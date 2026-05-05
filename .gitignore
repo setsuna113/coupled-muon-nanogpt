@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Project artifacts
+data/
+results/
+wandb/
+*.bin
+*.pt
+*.ckpt
+*.safetensors
+*.log
+
+# Local overrides
+configs/local/
+.env
+*.local.yaml

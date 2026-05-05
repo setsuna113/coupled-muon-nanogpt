@@ -1,0 +1,318 @@
+"""Config-driven DDP training loop.
+
+Single entry point. Usage:
+
+    torchrun --nproc_per_node=$N -m coupled_muon_nanogpt.train --config <path>
+
+CLI accepts:
+    --config <path>       (required)  resolved against configs/base.yaml
+    --seed <int>          (default 0)
+    --override key=value  (repeatable) escape hatch, e.g. --override optimizer.lr=3e-3
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+
+from .data.loader import ShardDataLoader
+from .eval import evaluate
+from .model.transformer import GPT, BlockConfig, GPTConfig
+from .optim.factory import build_optimizer
+from .probes.attn_logit import attn_logit_probe
+from .probes.coupled_pair import coupled_pair_probe
+from .probes.manager import ProbeManager
+from .probes.svd import svd_probe
+from .utils import cosine_lr, run_id, save_ckpt, seed_all, setup_ddp
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", type=str, required=True)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--override", action="append", default=[], help="dot.path=value")
+    return p.parse_args(argv)
+
+
+def load_config(path: str, overrides: list[str]) -> Any:
+    from omegaconf import OmegaConf
+
+    base_path = Path(__file__).resolve().parent.parent.parent / "configs" / "base.yaml"
+    cfg = OmegaConf.load(base_path)
+    cfg = OmegaConf.merge(cfg, OmegaConf.load(path))
+    if overrides:
+        cfg = OmegaConf.merge(cfg, OmegaConf.from_dotlist(overrides))
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+def build_model(cfg: Any) -> GPT:
+    block = BlockConfig(
+        hidden=int(cfg.model.hidden),
+        n_heads=int(cfg.model.attn.n_heads),
+        n_kv_heads=cfg.model.attn.get("n_kv_heads") or None,
+        head_dim=cfg.model.attn.get("head_dim") or None,
+        intermediate=int(cfg.model.mlp.get("intermediate", 0)),
+        norm_type=str(cfg.model.norm.type),
+        norm_eps=float(cfg.model.norm.eps),
+        mlp_type=str(cfg.model.mlp.type),
+        pos_emb_type=str(cfg.model.pos_emb.type),
+        rope_base=float(cfg.model.pos_emb.get("rope_base", 10000.0)),
+        qk_norm=bool(cfg.model.attn.qk_norm),
+        max_seq_len=int(cfg.train.seq_len),
+        moe_enabled=bool(cfg.model.moe.enabled),
+        moe_cfg=dict(
+            num_experts=int(cfg.model.moe.get("num_experts", 8)),
+            top_k=int(cfg.model.moe.get("top_k", 2)),
+            capacity_factor=float(cfg.model.moe.get("capacity_factor", 1.25)),
+            aux_loss_coef=float(cfg.model.moe.get("aux_loss_coef", 0.01)),
+            z_loss_coef=float(cfg.model.moe.get("z_loss_coef", 1e-3)),
+            balancing_type=str(cfg.model.moe.get("balancing_type", "aux_loss")),
+        )
+        if cfg.model.moe.enabled
+        else {},
+    )
+    gpt_cfg = GPTConfig(
+        vocab_size=int(cfg.model.vocab_size),
+        n_layers=int(cfg.model.n_layers),
+        block=block,
+        tie_embeddings=bool(cfg.model.get("tie_embeddings", True)),
+        init_std=float(cfg.model.get("init_std", 0.02)),
+    )
+    return GPT(gpt_cfg)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv or sys.argv[1:])
+    cfg = load_config(args.config, args.override)
+
+    rank, world_size, local_rank = setup_ddp()
+    device = torch.device("cuda", local_rank) if torch.cuda.is_available() else torch.device("cpu")
+
+    seed_all(args.seed + rank)
+    rid = run_id(cfg, args.seed)
+    out_dir = Path(cfg.run.output_dir) / rid
+    if rank == 0:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Persist resolved config alongside results.
+        from omegaconf import OmegaConf
+
+        with (out_dir / "config.yaml").open("w") as f:
+            f.write(OmegaConf.to_yaml(cfg))
+        print(f"[run_id] {rid}")
+        print(f"[out_dir] {out_dir}")
+
+    # Build model on the right device, with bf16 weights left in fp32 master.
+    model = build_model(cfg).to(device)
+    if rank == 0:
+        n_params = model.num_parameters(exclude_embedding=False)
+        n_active = model.num_parameters(exclude_embedding=True)
+        print(f"[model] params={n_params/1e6:.2f}M  (excl. embed: {n_active/1e6:.2f}M)")
+
+    if world_size > 1:
+        model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+        unwrapped = model.module
+    else:
+        unwrapped = model
+
+    optimizer = build_optimizer(unwrapped, cfg)
+
+    # Data
+    tr_loader = ShardDataLoader(
+        shard_dir=Path(cfg.data.shard_dir) / "train",
+        seq_len=int(cfg.train.seq_len),
+        local_batch_size=int(cfg.train.local_batch_size),
+        rank=rank,
+        world_size=world_size,
+        seed=args.seed,
+        infinite=True,
+    )
+    val_loader = ShardDataLoader(
+        shard_dir=Path(cfg.data.shard_dir) / "val",
+        seq_len=int(cfg.train.seq_len),
+        local_batch_size=int(cfg.train.local_batch_size),
+        rank=rank,
+        world_size=world_size,
+        seed=args.seed + 12345,
+        infinite=True,
+    )
+
+    # Probes
+    probes = ProbeManager()
+    probe_cfg = cfg.train.get("probes", {})
+    if probe_cfg.get("svd_interval_tokens", 0):
+        probes.register("svd", svd_probe, int(probe_cfg.svd_interval_tokens))
+    if probe_cfg.get("coupled_pair_interval_tokens", 0):
+        probes.register("coupled_pair", coupled_pair_probe, int(probe_cfg.coupled_pair_interval_tokens))
+    if probe_cfg.get("attn_logit_interval_tokens", 0):
+        probes.register("attn_logit", attn_logit_probe, int(probe_cfg.attn_logit_interval_tokens))
+
+    # Wandb (rank 0 only)
+    use_wandb = bool(cfg.run.get("wandb", False)) and rank == 0
+    if use_wandb:
+        try:
+            import wandb
+
+            from omegaconf import OmegaConf as _OC
+
+            wandb.init(
+                project=str(cfg.run.get("wandb_project", "coupled-muon-nanogpt")),
+                name=rid,
+                config=_OC.to_container(cfg, resolve=True),
+                dir=str(out_dir),
+            )
+        except ImportError:
+            use_wandb = False
+
+    metrics_path = out_dir / "metrics.jsonl"
+    metrics_f = metrics_path.open("a") if rank == 0 else None
+
+    # Training loop
+    total_tokens_target = int(cfg.train.total_tokens)
+    grad_accum = int(cfg.train.grad_accum_steps)
+    global_batch_tokens = int(cfg.train.local_batch_size) * int(cfg.train.seq_len) * world_size * grad_accum
+    total_steps = total_tokens_target // global_batch_tokens
+    warmup_steps = int(cfg.train.warmup_steps)
+    base_lr = float(cfg.optimizer.lr)
+    eval_every_steps = int(cfg.train.get("eval_every_steps", max(100, total_steps // 20)))
+    log_every_steps = int(cfg.train.get("log_every_steps", 10))
+    val_tokens = int(cfg.train.get("val_tokens", 1_000_000))
+    grad_clip = float(cfg.train.get("grad_clip", 1.0))
+    bf16 = bool(cfg.train.get("bf16", True))
+
+    if rank == 0:
+        print(
+            f"[schedule] total_steps={total_steps}  warmup={warmup_steps}  "
+            f"global_batch_tokens={global_batch_tokens}  total_tokens={total_tokens_target}"
+        )
+
+    model.train()
+    cumulative_tokens = 0
+    t0 = time.time()
+    for step in range(total_steps):
+        # Set LR
+        lr_t = cosine_lr(step, total_steps, warmup_steps, base_lr)
+        for pg in optimizer.param_groups:
+            pg["lr"] = lr_t
+
+        ctx_for_probes: dict[str, Any] = {
+            "step": step,
+            "n_heads": int(cfg.model.attn.n_heads),
+            "n_kv_heads": int(cfg.model.attn.get("n_kv_heads") or cfg.model.attn.n_heads),
+        }
+
+        loss_accum = 0.0
+        max_logits_collect: torch.Tensor | None = None
+
+        # Whether to ask the model to return per-layer max logits this step.
+        want_max_logit = (
+            probe_cfg.get("attn_logit_interval_tokens", 0)
+            and (cumulative_tokens % int(probe_cfg.attn_logit_interval_tokens)) < global_batch_tokens
+        )
+
+        for micro in range(grad_accum):
+            x, y = tr_loader.next_batch()
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True)
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=bf16 and device.type == "cuda"):
+                out = unwrapped(x, targets=y, return_max_logit=bool(want_max_logit))
+                loss = out["total_loss"] / grad_accum
+            loss.backward()
+            loss_accum += loss.item() * grad_accum
+            if "max_attn_logits" in out:
+                max_logits_collect = out["max_attn_logits"].detach()
+
+        if grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(unwrapped.parameters(), grad_clip)
+
+        # Optimizer step (timed, per d.6.9).
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        t_opt0 = time.time()
+        optimizer.step()
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        opt_step_seconds = time.time() - t_opt0
+        optimizer.zero_grad(set_to_none=True)
+
+        cumulative_tokens += global_batch_tokens
+
+        if rank == 0 and (step % log_every_steps == 0 or step == total_steps - 1):
+            elapsed = time.time() - t0
+            tps = cumulative_tokens / max(1e-6, elapsed)
+            row = {
+                "step": step,
+                "tokens": cumulative_tokens,
+                "lr": lr_t,
+                "loss": loss_accum / grad_accum,
+                "opt_step_s": opt_step_seconds,
+                "tok_per_s": tps,
+            }
+            print(json.dumps(row))
+            metrics_f.write(json.dumps({"event": "step", **row}) + "\n")
+            metrics_f.flush()
+            if use_wandb:
+                wandb.log(row, step=step)
+
+        # Probes
+        if rank == 0:
+            ctx_for_probes["max_attn_logits"] = max_logits_collect
+            probe_out = probes.maybe_fire(unwrapped, optimizer, cumulative_tokens, ctx_for_probes)
+            if probe_out:
+                metrics_f.write(json.dumps({"event": "probe", "step": step, "tokens": cumulative_tokens, **probe_out}) + "\n")
+                metrics_f.flush()
+                if use_wandb:
+                    flat = _flatten_for_wandb(probe_out)
+                    if flat:
+                        wandb.log(flat, step=step)
+
+        # Eval
+        if (step + 1) % eval_every_steps == 0 or step == total_steps - 1:
+            val_metrics = evaluate(unwrapped, val_loader, val_tokens, device)
+            if world_size > 1 and dist.is_initialized():
+                t = torch.tensor([val_metrics["val_loss"]], device=device)
+                dist.all_reduce(t, op=dist.ReduceOp.AVG)
+                val_metrics["val_loss"] = float(t.item())
+            if rank == 0:
+                row = {"step": step, "tokens": cumulative_tokens, **val_metrics}
+                print(json.dumps({"event": "val", **row}))
+                metrics_f.write(json.dumps({"event": "val", **row}) + "\n")
+                metrics_f.flush()
+                if use_wandb:
+                    wandb.log(val_metrics, step=step)
+
+    # Final checkpoint
+    if rank == 0:
+        ckpt_path = save_ckpt(out_dir / "checkpoints", total_steps, unwrapped, optimizer, cfg, args.seed)
+        print(f"[saved_ckpt] {ckpt_path}")
+        metrics_f.close()
+        if use_wandb:
+            wandb.finish()
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def _flatten_for_wandb(probe_out: dict[str, Any], prefix: str = "") -> dict[str, float]:
+    flat: dict[str, float] = {}
+    for k, v in probe_out.items():
+        key = f"{prefix}{k}"
+        if isinstance(v, dict):
+            flat.update(_flatten_for_wandb(v, prefix=key + "/"))
+        elif isinstance(v, (int, float)):
+            flat[key] = float(v)
+        elif isinstance(v, list) and v and isinstance(v[0], (int, float)):
+            flat[key + "/max"] = float(max(v))
+            flat[key + "/mean"] = float(sum(v) / len(v))
+    return flat
+
+
+if __name__ == "__main__":
+    main()

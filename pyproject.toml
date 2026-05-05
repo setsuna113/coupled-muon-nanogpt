@@ -1,0 +1,42 @@
+[project]
+name = "coupled-muon-nanogpt"
+version = "0.1.0"
+description = "Coupled Muon v2 ladder experiments on a NanoGPT-style harness"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.5",
+    "omegaconf>=2.3",
+    "tiktoken>=0.7",
+    "wandb>=0.18",
+    "einops>=0.8",
+    "datasets>=3.0",
+    "numpy>=1.26",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coupled_muon_nanogpt"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E741"]  # ambiguous var name (we use l, I, etc. as math indices)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

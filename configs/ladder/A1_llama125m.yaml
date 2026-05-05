@@ -1,0 +1,41 @@
+# Ladder rung A1 — A0 scaled to 125M (depth 2× or width 1.41×). Width-scaled here.
+# Tests whether the coupled effect persists at 2× scale on 4×H200.
+name: ladder_A1_llama125m
+
+model:
+  hidden: 768
+  n_layers: 12
+  attn:
+    n_heads: 12
+    qk_norm: false
+  mlp:
+    type: swiglu
+    intermediate: 2048             # ≈ 8/3 * 768 rounded
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+
+train:
+  total_tokens: 2_500_000_000
+  seq_len: 2048
+  local_batch_size: 16
+  grad_accum_steps: 4
+  warmup_steps: 300
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 200_000_000
+    coupled_pair_interval_tokens: 200_000_000
+    attn_logit_interval_tokens: 20_000_000
+
+run:
+  wandb: true

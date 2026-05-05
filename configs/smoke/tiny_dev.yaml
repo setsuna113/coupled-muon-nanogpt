@@ -1,0 +1,32 @@
+# 5-min pipeline sanity on 1×4090. ~10M params, all probes off (would be noisy at this size).
+name: tiny_dev
+
+model:
+  hidden: 256
+  n_layers: 4
+  attn:
+    n_heads: 4
+  mlp:
+    type: swiglu
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+
+train:
+  total_tokens: 5_000_000
+  seq_len: 1024
+  local_batch_size: 8
+  grad_accum_steps: 1
+  warmup_steps: 50
+  log_every_steps: 5
+  eval_every_steps: 100
+  val_tokens: 200_000
+  probes:
+    svd_interval_tokens: 0
+    coupled_pair_interval_tokens: 0
+    attn_logit_interval_tokens: 0
+
+run:
+  wandb: false
