@@ -5,7 +5,12 @@ description = "Coupled Muon v2 ladder experiments on a NanoGPT-style harness"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "torch>=2.5",
+    # Pinned to a cu124 build so the same wheel works on both the 4090 dev box
+    # (driver 12.4) and H200 training box (driver 12.8). Newer torch wheels
+    # default to cu128/cu130 which require correspondingly newer drivers; on
+    # Inspire Studio those wheels silently fall back to CPU. Hopper (sm_90)
+    # is supported by cu124, so H200 runs at full speed.
+    "torch>=2.5,<2.7",
     "omegaconf>=2.3",
     "tiktoken>=0.7",
     "wandb>=0.18",
@@ -25,6 +30,16 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Force uv to resolve `torch` against the PyTorch cu124 index instead of PyPI
+# (which serves cu128/cu130 builds for newer torch versions).
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/coupled_muon_nanogpt"]
