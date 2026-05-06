@@ -82,6 +82,40 @@ scripts/        smoke_4090.sh, train_4xh200.sh, prepare_data.sh
 tests/          pair classification, toggle combinations, ckpt stamp
 ```
 
+## Wandb
+
+Every ladder/sweep config logs to wandb by default (`configs/base.yaml` sets
+`run.wandb: true`); smoke configs override to `false`. Each run carries four
+wandb dimensions, all derived from the resolved config:
+
+| dimension | source | purpose |
+|---|---|---|
+| `project` | `cfg.run.wandb_project` (sweep YAMLs override per study) | Top-level study container. |
+| `group` | `cfg.run.wandb_group` if set, else `${name}/${optimizer.type}/lr{lr}` | Auto-aggregates seeds-of-same-cell. |
+| `job_type` | `cfg.optimizer.type` | UI optimizer-family separator. |
+| `tags` | rung name, optimizer, seed, MoE flags, coupling flags, `smoke` | Filterable axes. |
+
+Cross-config-comparable metrics (`loss`, `val_loss`, slow probes) plot against
+**tokens** as the x-axis (`wandb.define_metric(..., step_metric="tokens")`).
+Within-run-only metrics (`lr`, `opt_step_s`, `tok_per_s`, `ns_internal/*`) keep
+the default step axis.
+
+```bash
+# Online (training nodes with internet):
+torchrun --nproc_per_node=4 -m coupled_muon_nanogpt.train --config configs/ladder/A0_llama60m.yaml --seed 0
+
+# Offline (training nodes without internet — recommended workflow):
+WANDB_MODE=offline torchrun --nproc_per_node=4 -m coupled_muon_nanogpt.train --config configs/ladder/A0_llama60m.yaml --seed 0
+
+# Sync from a machine with internet (after offline training completes):
+wandb sync results/<run_id>/wandb/
+```
+
+Sweep YAMLs that vary axes the fallback group formula doesn't capture (e.g.
+`pair_ablation` varies `couple_qk/vo/updown`) override `run.wandb_group` with
+OmegaConf interpolation; see `configs/sweeps/pair_ablation.yaml` for the
+pattern.
+
 ## References
 
 - Design doc: `experiment.md` (top of this repo).

@@ -1,0 +1,18 @@
+# d.3 telescoping LR sweep — AdamW baseline across dense rungs A1, B, C, D, E,
+# G, H. Per Essential AI 2505.02222: AdamW LRs {3e-5, 1e-4, 3e-4, 1e-3, 3e-3}.
+# Run alongside lr_grid_dense_muon.yaml; aggregate with bootstrap_median_ci
+# to compute the coupled-vs-Muon vs AdamW reference gap.
+bases:
+  - configs/ladder/A1_llama125m.yaml
+  - configs/ladder/B_gelu2mat_125m.yaml
+  - configs/ladder/C_learnedpos_125m.yaml
+  - configs/ladder/D_layernorm_125m.yaml
+  - configs/ladder/E_karpathy_125m.yaml
+  - configs/ladder/G_qknorm_125m.yaml
+  - configs/ladder/H_modded_dense_125m.yaml
+grid:
+  optimizer.type: [adamw]
+  optimizer.lr: [3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3]
+  seed: [0, 1, 2]
+fixed:
+  run.wandb_project: coupled-muon-ladder

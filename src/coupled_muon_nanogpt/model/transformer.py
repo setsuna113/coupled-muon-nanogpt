@@ -38,6 +38,7 @@ class BlockConfig:
     mlp_type: str = "swiglu"
     pos_emb_type: str = "rope"
     rope_base: float = 10000.0
+    rope_partial_frac: float = 1.0  # 0.5 = modded-nanogpt half-RoPE
     qk_norm: bool = False
     max_seq_len: int = 4096
     moe_enabled: bool = False
@@ -51,6 +52,12 @@ class GPTConfig:
     block: BlockConfig = field(default_factory=BlockConfig)
     tie_embeddings: bool = True
     init_std: float = 0.02
+    # Per experiment.md d.2 rung I: "MoE replacing every other dense MLP".
+    # When True (default — matches the spec), only odd-indexed blocks become MoE
+    # if `block.moe_enabled` is set. When False, every block becomes MoE (the
+    # original behaviour, which over-counts per-block MoE params and contradicts
+    # d.2 — kept as an opt-in escape hatch).
+    moe_every_other: bool = True
 
 
 class Block(nn.Module):
@@ -67,6 +74,7 @@ class Block(nn.Module):
                 qk_norm=cfg.qk_norm,
                 pos_emb_type=cfg.pos_emb_type,
                 rope_base=cfg.rope_base,
+                rope_partial_frac=cfg.rope_partial_frac,
                 max_seq_len=cfg.max_seq_len,
             )
         )
@@ -76,6 +84,10 @@ class Block(nn.Module):
         if cfg.moe_enabled:
             moe_kwargs = dict(cfg.moe_cfg)
             moe_kwargs.setdefault("expert_mlp_type", cfg.mlp_type)
+            # `intermediate` in moe_cfg is consumed by _block_cfg_for_layer to
+            # override the per-expert size; the resolved value is already in
+            # `intermediate` (the local). Pop to avoid the kwargs collision.
+            moe_kwargs.pop("intermediate", None)
             moe_cfg = MoEConfig(hidden=cfg.hidden, intermediate=intermediate, **moe_kwargs)
             self.mlp = MoEFFN(moe_cfg)
         else:
@@ -110,12 +122,38 @@ class GPT(nn.Module):
             self.pos_emb = nn.Embedding(cfg.block.max_seq_len, cfg.block.hidden)
         else:
             self.pos_emb = None
-        self.layers = nn.ModuleList([Block(cfg.block) for _ in range(cfg.n_layers)])
+        self.layers = nn.ModuleList([Block(self._block_cfg_for_layer(i)) for i in range(cfg.n_layers)])
         self.norm_out = make_norm(cfg.block.hidden, cfg.block.norm_type, eps=cfg.block.norm_eps)
         self.lm_head = nn.Linear(cfg.block.hidden, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.embed.weight
         self.apply(self._init_weights)
+
+    def _block_cfg_for_layer(self, layer_idx: int) -> BlockConfig:
+        """Per-layer BlockConfig. With `moe_every_other` (default), only the
+        odd-indexed blocks get MoE — matching experiment.md d.2 rung I:
+        'MoE replacing every other dense MLP'.
+
+        For MoE blocks, `moe.intermediate` (when > 0) overrides the dense
+        `mlp.intermediate` to control per-expert size independently of the
+        dense MLP. This is what makes M (16 experts × 1024) and N (4 × 4096)
+        controlled comparisons against I (8 × 2048) — same dense MLP across
+        all three, only per-expert size varies."""
+        bc = self.cfg.block
+        if not bc.moe_enabled:
+            return bc
+        if self.cfg.moe_every_other:
+            is_moe = (layer_idx % 2) == 1
+            if not is_moe:
+                # Dense layer: use mlp.intermediate, not moe.intermediate.
+                return BlockConfig(
+                    **{**bc.__dict__, "moe_enabled": False, "moe_cfg": {}}
+                )
+        # MoE layer: when moe.intermediate > 0, override BlockConfig.intermediate.
+        moe_inter = int(bc.moe_cfg.get("intermediate", 0))
+        if moe_inter > 0:
+            return BlockConfig(**{**bc.__dict__, "intermediate": moe_inter})
+        return bc
 
     def _init_weights(self, m: nn.Module):
         if isinstance(m, nn.Linear):

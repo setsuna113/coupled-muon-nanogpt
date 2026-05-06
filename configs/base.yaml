@@ -5,8 +5,15 @@ name: base
 
 run:
   output_dir: results
-  wandb: false
+  wandb: true                    # default ON for ladder/sweeps; smoke configs override.
   wandb_project: coupled-muon-nanogpt
+  wandb_group: null              # null ⇒ fallback formula `${name}/${optimizer.type}/lr${optimizer.lr}`.
+                                 # Sweep YAMLs use OmegaConf ${...} interpolation to override
+                                 # (e.g. pair_ablation needs the couple_* flags in the group).
+  wandb_mode: null               # null ⇒ honor WANDB_MODE env var, else online. Set to
+                                 # "offline" in offline-only environments; sync post-hoc with
+                                 # `wandb sync results/<rid>/wandb/`.
+  wandb_tags: []                 # extra tags merged with the auto-derived ones.
 
 data:
   shard_dir: data/fineweb_edu_2048
@@ -25,6 +32,7 @@ model:
     n_kv_heads: null            # null ⇒ MHA
     head_dim: null
     qk_norm: false
+    rope_partial_frac: 1.0      # 0.5 ⇒ modded-nanogpt half-RoPE
     pos_emb_unused_placeholder: 0  # placeholder so the section validates
   pos_emb:
     type: rope                  # rope | learned
@@ -40,13 +48,24 @@ model:
     aux_loss_coef: 0.01
     z_loss_coef: 1.0e-3
     balancing_type: aux_loss    # aux_loss | deepseek_bias
+    bias_update_lr: 1.0e-3      # DeepSeek-V2 §3.2 sign-rule step
+    shared_expert: false        # DeepSeekMoE-style always-on expert (rung L)
+    shared_expert_intermediate: 0  # 0 ⇒ inherit from per-expert intermediate
+    every_other: true           # spec d.2: MoE replaces every OTHER dense MLP
+    intermediate: 0             # 0 ⇒ inherit from mlp.intermediate. Separate
+                                # control needed because M/N stress per-expert
+                                # size while keeping the dense MLP fixed.
 
 optimizer:
   type: coupled_muon_v2         # adamw | muon | coupled_muon_v2
   lr: 3.0e-3                    # for muon-family; AdamW configs override
-  wd: 0.1
+  wd: 0.1                       # base value; with `wd_per_width: true` it is
+                                # divided by hidden at apply time per d.3 +
+                                # Bergsma 2025 ("0.1/width independent wd").
+  wd_per_width: true            # d.3 protocol — applies to all optimizers.
   momentum: 0.95
-  betas: [0.9, 0.95]
+  betas: [0.95, 0.95]           # AdamW β₁=0.95, β₂=0.95 per experiment.md d.3
+                                # (Essential AI 2505.02222). Pre-fix had 0.9/0.95.
   eps: 1.0e-8
   ns_steps: 5
   coupled_steps: 4              # 0 ⇒ plain Muon path inside CoupledMuon_v2
@@ -55,6 +74,15 @@ optimizer:
   couple_updown: true
   use_multi_head: true          # enable per-head reshape in coupled NS
   ns_dtype: bf16
+  # Two-stage composition: True (default) is Muon(C_A(g; B)) — the operating
+  # point that produced the LLaMA-60M result. False is the stage-1-only
+  # ablation (experiment.md a.2 / d.4). Toggle to localize whether the trailing
+  # NS pass is doing real work or is approximately a no-op.
+  final_polish: true
+  # Router optimizer: True (default, matches Moonlight 2502.16982 §2.2 and
+  # Cerebras nanoMoE) routes MoE routers through Muon. False → AdamW (rung J
+  # ablation, DeepSeek-V2/V3/OLMoE-style). See experiment.md c.3.
+  couple_router_to_muon: true
 
 train:
   total_tokens: 100_000_000     # smoke default; ladder configs override
@@ -71,3 +99,5 @@ train:
     svd_interval_tokens: 50_000_000
     coupled_pair_interval_tokens: 50_000_000
     attn_logit_interval_tokens: 5_000_000
+    moe_load_interval_tokens: 0       # MoE-only; ladder/I_moe and smoke/I_moe override
+    ns_internal_interval_tokens: 0    # diagnostic-only; per d.6.3

@@ -27,6 +27,7 @@ class AttnConfig:
     qk_norm: bool = False
     pos_emb_type: str = "rope"  # "rope" | "learned"
     rope_base: float = 10000.0
+    rope_partial_frac: float = 1.0  # fraction of head_dim that gets RoPE'd (modded-style 0.5)
     max_seq_len: int = 4096
 
 
@@ -52,9 +53,19 @@ class CausalSelfAttention(nn.Module):
             self.k_norm = RMSNorm(self.head_dim)
 
         if cfg.pos_emb_type == "rope":
-            self.rope = RotaryEmbedding(self.head_dim, base=cfg.rope_base, max_seq_len=cfg.max_seq_len)
+            # Resolve rotary_dim to even fraction of head_dim.
+            rotary_dim = int(self.head_dim * cfg.rope_partial_frac) & ~1
+            rotary_dim = max(2, min(self.head_dim, rotary_dim))
+            self.rotary_dim = rotary_dim
+            self.rope = RotaryEmbedding(
+                self.head_dim,
+                base=cfg.rope_base,
+                max_seq_len=cfg.max_seq_len,
+                rotary_dim=rotary_dim,
+            )
         elif cfg.pos_emb_type == "learned":
             self.rope = None
+            self.rotary_dim = 0
         else:
             raise ValueError(f"Unknown pos_emb_type={cfg.pos_emb_type!r}")
 

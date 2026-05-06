@@ -1,7 +1,11 @@
-# Ladder rung I — first MoE rung. Modded-style dense block but every other MLP
-# is replaced with sparse 8-expert top-2. ~500M total / ~125M active.
+# Ladder rung I — first MoE rung. Every-other-layer MoE (per d.2) with 8-expert
+# top-2 routing. Measured: 322M total / 283M non-embed (spec d.5 target was
+# 500M total / 125M active — actual is ~half because every-other replacement
+# is genuinely sparser than naive every-block, and our dense MLP intermediate
+# stays at the 125M-class size). I/J/K/M/N keep the same dense MLP and same
+# total MoE capacity (E×ff_per_expert constant) for a controlled comparison.
 # Router under AdamW (per experiment.md c.3); aux-loss balancing for first cut.
-name: ladder_I_moe_500m
+name: ladder_I_moe
 
 model:
   hidden: 768
@@ -31,7 +35,8 @@ optimizer:
   coupled_steps: 4
   ns_steps: 5
   use_multi_head: true
-  # Routers go to AdamW automatically via the factory's "router" filter.
+  couple_router_to_muon: true   # default; matches Moonlight 2502.16982 §2.2.
+                                # Rung J flips this to false (AdamW-router ablation).
 
 train:
   total_tokens: 5_000_000_000
@@ -46,6 +51,4 @@ train:
     svd_interval_tokens: 500_000_000
     coupled_pair_interval_tokens: 500_000_000
     attn_logit_interval_tokens: 50_000_000
-
-run:
-  wandb: true
+    moe_load_interval_tokens: 50_000_000

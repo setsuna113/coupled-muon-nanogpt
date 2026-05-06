@@ -1,0 +1,60 @@
+# Ladder rung L — I with shared expert (DeepSeekMoE-style).
+# Per experiment.md d.2: "1 always-on, 7 routed top-1". The shared expert
+# absorbs broadly-useful computation; routed experts then specialise on
+# narrower distributions. Hypothesis (c.5): inter-expert competition for
+# tokens is what makes coupled-NS noise large in MoE; a shared baseline
+# should reduce per-expert variance, allowing per-expert (down,up) coupling
+# to be less noisy.
+# Decision rule: if L shows coupled gap recovery vs I, c.5 (inter-expert
+# competition / per-expert variance) is the failure mode.
+# Measured: 350M total (≈10% larger than I/J/K because the shared expert adds
+# one always-on MLP per MoE layer; that's the rung's defining feature, not a
+# spec violation).
+name: ladder_L_shared_expert
+
+model:
+  hidden: 768
+  n_layers: 12
+  attn:
+    n_heads: 12
+    qk_norm: true
+  mlp:
+    type: swiglu
+    intermediate: 2048
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 8                # 1 shared + top-1 over the 8 routed
+    top_k: 1                      # routed top-1; the always-on expert sits alongside
+    capacity_factor: 1.25
+    aux_loss_coef: 0.01
+    z_loss_coef: 1.0e-3
+    balancing_type: aux_loss
+    shared_expert: true
+    shared_expert_intermediate: 0   # 0 ⇒ same as routed intermediate
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+  couple_router_to_muon: true   # default; rung L varies the *expert* topology.
+
+train:
+  total_tokens: 5_000_000_000
+  seq_len: 2048
+  local_batch_size: 8
+  grad_accum_steps: 8
+  warmup_steps: 500
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 500_000_000
+    coupled_pair_interval_tokens: 500_000_000
+    attn_logit_interval_tokens: 50_000_000
+    moe_load_interval_tokens: 50_000_000

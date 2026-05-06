@@ -1,5 +1,9 @@
 # 5-min pipeline sanity on 1×4090. ~10M params, all probes off (would be noisy at this size).
+# Uses pre-tokenised synthetic shards from data/synthetic_smoke/ — no FineWeb prep needed.
 name: tiny_dev
+
+data:
+  shard_dir: data/synthetic_smoke
 
 model:
   hidden: 256

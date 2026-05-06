@@ -7,10 +7,26 @@ matrices follow the same `up_proj` / `down_proj` (and optional `gate_proj`)
 naming so the optimizer factory's pair detection works on them too.
 
 Balancing modes (`balancing_type`):
-- `aux_loss`     — Switch-Transformer style auxiliary load-balance loss.
-- `deepseek_bias`— Aux-loss-free, bias-update routing (DeepSeek-V3 style).
-                   *Stub for now*: routes via aux_loss but exposes the bias parameter
-                   that future work will update offline (per d.4 of experiment.md).
+- `aux_loss`     — Switch-Transformer style auxiliary load-balance loss:
+                   aux = E · Σ_i Pi · stop_grad(fi). The gradient flows ONLY
+                   through Pi (the router probabilities), so aux directly
+                   contaminates **router** weights — not the expert MLPs.
+                   Rung K therefore tests router-side contamination only.
+                   experiment.md c.4 conjectures contamination of expert MLP
+                   weights too; that would require a different aux formulation
+                   (e.g. an activation-magnitude term) and is out of scope here.
+- `deepseek_bias`— Aux-loss-free, sign-rule bias-update routing
+                   (DeepSeek-V2 §3.2 / DeepSeek-V3). The training loop calls
+                   `update_router_bias()` after each `optimizer.step()` to nudge
+                   the per-expert bias toward uniform load. The aux-loss coefficient
+                   is forced to 0 in this mode.
+
+Shared-expert mode (`shared_expert`):
+- When `shared_expert: True`, an additional always-on expert processes every
+  token at every step (DeepSeekMoE-style); top-k routing then selects from the
+  remaining `num_experts` experts. The shared-expert path uses the same
+  `up_proj`/`down_proj` naming and is automatically pair-detected by the
+  optimizer factory.
 
 Returns aux losses through a side-channel; the training loop adds them to the LM
 loss with the configured coefficients.
@@ -20,6 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -35,8 +52,11 @@ class MoEConfig:
     capacity_factor: float = 1.25
     aux_loss_coef: float = 0.01
     z_loss_coef: float = 1e-3
-    balancing_type: str = "aux_loss"  # aux_loss | deepseek_bias | smebu (smebu deferred)
+    balancing_type: str = "aux_loss"  # aux_loss | deepseek_bias
     expert_mlp_type: str = "swiglu"
+    bias_update_lr: float = 1.0e-3      # DeepSeek-V2 §3.2 sign-rule step size
+    shared_expert: bool = False          # DeepSeekMoE-style always-on expert
+    shared_expert_intermediate: int = 0  # 0 ⇒ inherit from `intermediate`
 
 
 class MoEFFN(nn.Module):
@@ -51,8 +71,14 @@ class MoEFFN(nn.Module):
         # Router weight: gate_router so the factory's "router" filter sends it to AdamW.
         self.gate_router = nn.Linear(cfg.hidden, cfg.num_experts, bias=False)
         if cfg.balancing_type == "deepseek_bias":
-            # Bias term updated offline by the training loop (deferred).
+            # Per-expert bias added to routing logits; updated offline by
+            # update_router_bias() per DeepSeek-V2 §3.2 sign rule.
             self.register_buffer("router_bias", torch.zeros(cfg.num_experts))
+        if cfg.shared_expert:
+            shared_inter = (
+                cfg.shared_expert_intermediate if cfg.shared_expert_intermediate > 0 else cfg.intermediate
+            )
+            self.shared_expert = make_mlp(cfg.hidden, shared_inter, cfg.expert_mlp_type)
         self._last_aux_loss: torch.Tensor | None = None
         self._last_z_loss: torch.Tensor | None = None
         self._last_router_entropy: torch.Tensor | None = None
@@ -86,7 +112,12 @@ class MoEFFN(nn.Module):
         Pi = probs.mean(dim=0)  # (E,)
         fi = tokens_per_expert / (tokens_per_expert.sum() + 1e-9)
         aux = (Pi * fi).sum() * float(E)
-        self._last_aux_loss = aux * self.cfg.aux_loss_coef
+        # Per c.4: in deepseek_bias mode, aux loss contaminates the LM gradient
+        # with load-balancing bias. Force it to 0 regardless of aux_loss_coef.
+        if self.cfg.balancing_type == "deepseek_bias":
+            self._last_aux_loss = torch.zeros((), device=logits.device)
+        else:
+            self._last_aux_loss = aux * self.cfg.aux_loss_coef
         self._last_expert_load = tokens_per_expert.detach()
         self._last_router_entropy = -(probs * (probs + 1e-9).log()).sum(dim=-1).mean().detach()
 
@@ -109,7 +140,15 @@ class MoEFFN(nn.Module):
                 expert_in = x_flat[token_pos]
                 expert_out = self.experts[e](expert_in)
                 weighted = expert_out * slot_w[token_pos].unsqueeze(-1).to(expert_out.dtype)
-                out.index_add_(0, token_pos, weighted)
+                # Under autocast, expert_out can be bf16 while `out` (zeros_like(x_flat))
+                # is fp32 because reshape doesn't trigger autocast. index_add_ requires
+                # matching dtypes, so cast weighted into `out`'s dtype.
+                out.index_add_(0, token_pos, weighted.to(out.dtype))
+
+        # Always-on shared expert (DeepSeekMoE).
+        if self.cfg.shared_expert:
+            shared_out = self.shared_expert(x_flat)
+            out = out + shared_out.to(out.dtype)
 
         return out.view(B, T, C)
 
@@ -117,3 +156,58 @@ class MoEFFN(nn.Module):
         aux = self._last_aux_loss if self._last_aux_loss is not None else torch.zeros((), device=self.gate_router.weight.device)
         z = self._last_z_loss if self._last_z_loss is not None else torch.zeros((), device=self.gate_router.weight.device)
         return aux, z
+
+    @torch.no_grad()
+    def grad_norms(self) -> torch.Tensor:
+        """Per-expert gradient Frobenius norm: ‖∇W_up_i ⊕ ∇W_down_i (⊕ ∇W_gate_i)‖_F.
+
+        Must be called between `loss.backward()` and `optimizer.zero_grad()` —
+        consumes the `.grad` tensors directly. Returns a 1-D tensor of length
+        `num_experts`. Used by `probes.moe_load` to log per-expert gradient
+        signal magnitudes (experiment.md d.3 "per-expert grad norm")."""
+        norms = []
+        for expert in self.experts:
+            sq = 0.0
+            for p in expert.parameters():
+                if p.grad is None:
+                    continue
+                sq = sq + p.grad.detach().float().pow(2).sum()
+            norms.append(torch.as_tensor(sq).sqrt())
+        return torch.stack(norms) if norms else torch.zeros(0)
+
+    @torch.no_grad()
+    def update_router_bias(self) -> None:
+        """DeepSeek-V2 §3.2 aux-loss-free balancing: nudge `router_bias` toward
+        the value that equalises per-expert load.
+
+        Algorithm:
+            load_i  = number of (token, slot) pairs routed to expert i
+            f_i     = load_i / Σ load_j         # sums to 1
+            f_mean  = 1 / num_experts           # target under f_i sums-to-1
+            router_bias_i ← router_bias_i − γ · sign(f_i − f_mean)
+
+        Note on the target: with K = top_k > 1, an alternative normalisation
+        gives f_i' = load_i / N (number of tokens) which sums to K and has
+        target K / E. We use the f_i-sums-to-1 normalisation because that's
+        what `load.sum()` produces directly; the `K / E` formula was a bug
+        — under our normalisation every f_i was below K/E for K>1 and biases
+        drifted uniformly upward (a no-op due to softmax shift-invariance,
+        but also nondiagnostic).
+
+        Under DDP the per-rank `_last_expert_load` is summed across ranks
+        before the update so all ranks stay in sync.
+        """
+        if self.cfg.balancing_type != "deepseek_bias":
+            return
+        load = self._last_expert_load
+        if load is None:
+            return
+        load = load.detach().float().clone()
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(load, op=dist.ReduceOp.SUM)
+        total = load.sum().clamp_min(1e-9)
+        f_i = load / total                        # sums to 1
+        f_mean = 1.0 / float(self.cfg.num_experts)  # target under that normalisation
+        gamma = float(self.cfg.bias_update_lr)
+        # `router_bias` is a buffer registered in __init__ when balancing_type == deepseek_bias.
+        self.router_bias.add_(-gamma * torch.sign(f_i - f_mean).to(self.router_bias.dtype))

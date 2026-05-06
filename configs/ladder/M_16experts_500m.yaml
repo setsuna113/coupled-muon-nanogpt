@@ -1,0 +1,54 @@
+# Ladder rung M — 16 experts, top-2; per-expert intermediate halved.
+# Stress test for Moonlight's "max(A,B) too small" failure regime
+# (experiment.md c.1). Expect coupled-NS noise amplification through the
+# partner weight when per-expert effective batch shrinks to 12.5% of global.
+# Measured: 322M total (matches I; per-expert ff halved, num_experts doubled).
+name: ladder_M_16experts
+
+model:
+  hidden: 768
+  n_layers: 12
+  attn:
+    n_heads: 12
+    qk_norm: true
+  mlp:
+    type: swiglu
+    intermediate: 2048            # dense MLP same as I (controlled comparison)
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 16
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_coef: 0.01
+    z_loss_coef: 1.0e-3
+    balancing_type: aux_loss
+    intermediate: 1024            # per-expert intermediate halved vs I (2048).
+                                  # E×ff stays constant (16×1024 = 8×2048),
+                                  # pushing into Moonlight's small-matrix regime.
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+  couple_router_to_muon: true   # default; rung M varies *expert count*, not router.
+
+train:
+  total_tokens: 5_000_000_000
+  seq_len: 2048
+  local_batch_size: 4               # smaller per-step due to larger E
+  grad_accum_steps: 16
+  warmup_steps: 500
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 500_000_000
+    coupled_pair_interval_tokens: 500_000_000
+    attn_logit_interval_tokens: 50_000_000
+    moe_load_interval_tokens: 50_000_000

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -23,13 +22,17 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
+from . import wandb_utils
 from .data.loader import ShardDataLoader
 from .eval import evaluate
+from .model.moe import MoEFFN
 from .model.transformer import GPT, BlockConfig, GPTConfig
 from .optim.factory import build_optimizer
 from .probes.attn_logit import attn_logit_probe
 from .probes.coupled_pair import coupled_pair_probe
 from .probes.manager import ProbeManager
+from .probes.moe_load import moe_load_probe
+from .probes.ns_internal import ns_internal_probe
 from .probes.svd import svd_probe
 from .utils import cosine_lr, run_id, save_ckpt, seed_all, setup_ddp
 
@@ -66,6 +69,7 @@ def build_model(cfg: Any) -> GPT:
         mlp_type=str(cfg.model.mlp.type),
         pos_emb_type=str(cfg.model.pos_emb.type),
         rope_base=float(cfg.model.pos_emb.get("rope_base", 10000.0)),
+        rope_partial_frac=float(cfg.model.attn.get("rope_partial_frac", 1.0)),
         qk_norm=bool(cfg.model.attn.qk_norm),
         max_seq_len=int(cfg.train.seq_len),
         moe_enabled=bool(cfg.model.moe.enabled),
@@ -76,6 +80,11 @@ def build_model(cfg: Any) -> GPT:
             aux_loss_coef=float(cfg.model.moe.get("aux_loss_coef", 0.01)),
             z_loss_coef=float(cfg.model.moe.get("z_loss_coef", 1e-3)),
             balancing_type=str(cfg.model.moe.get("balancing_type", "aux_loss")),
+            bias_update_lr=float(cfg.model.moe.get("bias_update_lr", 1.0e-3)),
+            shared_expert=bool(cfg.model.moe.get("shared_expert", False)),
+            shared_expert_intermediate=int(cfg.model.moe.get("shared_expert_intermediate", 0)),
+            # 0 ⇒ inherit from mlp.intermediate; >0 overrides for MoE layers only.
+            intermediate=int(cfg.model.moe.get("intermediate", 0)),
         )
         if cfg.model.moe.enabled
         else {},
@@ -86,6 +95,7 @@ def build_model(cfg: Any) -> GPT:
         block=block,
         tie_embeddings=bool(cfg.model.get("tie_embeddings", True)),
         init_std=float(cfg.model.get("init_std", 0.02)),
+        moe_every_other=bool(cfg.model.moe.get("every_other", True)),
     )
     return GPT(gpt_cfg)
 
@@ -154,23 +164,27 @@ def main(argv: list[str] | None = None) -> None:
         probes.register("coupled_pair", coupled_pair_probe, int(probe_cfg.coupled_pair_interval_tokens))
     if probe_cfg.get("attn_logit_interval_tokens", 0):
         probes.register("attn_logit", attn_logit_probe, int(probe_cfg.attn_logit_interval_tokens))
+    # MoE load + per-expert grad-norm probe needs to fire BEFORE optimizer.zero_grad().
+    if probe_cfg.get("moe_load_interval_tokens", 0):
+        probes.register(
+            "moe_load",
+            moe_load_probe,
+            int(probe_cfg.moe_load_interval_tokens),
+            needs_grads=True,
+        )
+    if probe_cfg.get("ns_internal_interval_tokens", 0):
+        probes.register(
+            "ns_internal",
+            ns_internal_probe,
+            int(probe_cfg.ns_internal_interval_tokens),
+            needs_grads=True,
+        )
 
-    # Wandb (rank 0 only)
-    use_wandb = bool(cfg.run.get("wandb", False)) and rank == 0
-    if use_wandb:
-        try:
-            import wandb
-
-            from omegaconf import OmegaConf as _OC
-
-            wandb.init(
-                project=str(cfg.run.get("wandb_project", "coupled-muon-nanogpt")),
-                name=rid,
-                config=_OC.to_container(cfg, resolve=True),
-                dir=str(out_dir),
-            )
-        except ImportError:
-            use_wandb = False
+    # Wandb (rank 0 only). All policy lives in wandb_utils; this module just
+    # decides whether to call it.
+    wandb_handle: wandb_utils.WandbHandle | None = None
+    if rank == 0 and bool(cfg.run.get("wandb", False)):
+        wandb_handle = wandb_utils.init_wandb(cfg, rid, args.seed, out_dir)
 
     metrics_path = out_dir / "metrics.jsonl"
     metrics_f = metrics_path.open("a") if rank == 0 else None
@@ -197,6 +211,11 @@ def main(argv: list[str] | None = None) -> None:
     model.train()
     cumulative_tokens = 0
     t0 = time.time()
+    # Track divergence flag (ns_internal.diverged or attn_logit > 1000) for the
+    # final wandb summary.
+    diverged_seen = False
+    last_val_loss: float | None = None
+    last_train_loss: float | None = None
     for step in range(total_steps):
         # Set LR
         lr_t = cosine_lr(step, total_steps, warmup_steps, base_lr)
@@ -233,6 +252,18 @@ def main(argv: list[str] | None = None) -> None:
         if grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(unwrapped.parameters(), grad_clip)
 
+        # Pre-step probes (those that consume `.grad` directly: per-expert grad
+        # norms, etc.). Fire on `cumulative_tokens + global_batch_tokens` so
+        # tokens align with the current step's grads.
+        pre_step_probe_tokens = cumulative_tokens + global_batch_tokens
+        pre_step_probe_out = (
+            probes.maybe_fire(
+                unwrapped, optimizer, pre_step_probe_tokens, ctx_for_probes, needs_grads=True
+            )
+            if rank == 0
+            else {}
+        )
+
         # Optimizer step (timed, per d.6.9).
         if device.type == "cuda":
             torch.cuda.synchronize()
@@ -243,6 +274,12 @@ def main(argv: list[str] | None = None) -> None:
         opt_step_seconds = time.time() - t_opt0
         optimizer.zero_grad(set_to_none=True)
 
+        # DeepSeek-V2 §3.2 aux-loss-free balancing: bias-update happens AFTER
+        # optimizer.step() and is a no-op for non-deepseek_bias modes.
+        for module in unwrapped.modules():
+            if isinstance(module, MoEFFN):
+                module.update_router_bias()
+
         cumulative_tokens += global_batch_tokens
 
         if rank == 0 and (step % log_every_steps == 0 or step == total_steps - 1):
@@ -251,6 +288,7 @@ def main(argv: list[str] | None = None) -> None:
             row = {
                 "step": step,
                 "tokens": cumulative_tokens,
+                "wall_clock_s": elapsed,
                 "lr": lr_t,
                 "loss": loss_accum / grad_accum,
                 "opt_step_s": opt_step_seconds,
@@ -259,20 +297,27 @@ def main(argv: list[str] | None = None) -> None:
             print(json.dumps(row))
             metrics_f.write(json.dumps({"event": "step", **row}) + "\n")
             metrics_f.flush()
-            if use_wandb:
-                wandb.log(row, step=step)
+            wandb_utils.log_step(wandb_handle, row)
+            last_train_loss = float(row["loss"])
 
-        # Probes
+        # Probes (post-step: those that don't need `.grad`).
         if rank == 0:
             ctx_for_probes["max_attn_logits"] = max_logits_collect
-            probe_out = probes.maybe_fire(unwrapped, optimizer, cumulative_tokens, ctx_for_probes)
+            probe_out = probes.maybe_fire(
+                unwrapped, optimizer, cumulative_tokens, ctx_for_probes, needs_grads=False
+            )
+            # Merge any pre-step (grad-needing) probe output collected before optimizer.step.
+            if pre_step_probe_out:
+                probe_out = {**probe_out, **pre_step_probe_out}
             if probe_out:
                 metrics_f.write(json.dumps({"event": "probe", "step": step, "tokens": cumulative_tokens, **probe_out}) + "\n")
                 metrics_f.flush()
-                if use_wandb:
-                    flat = _flatten_for_wandb(probe_out)
-                    if flat:
-                        wandb.log(flat, step=step)
+                if wandb_utils.probe_indicates_divergence(probe_out):
+                    diverged_seen = True
+                wandb_utils.log_probe(
+                    wandb_handle, probe_out, tokens=cumulative_tokens,
+                    wall_clock_s=time.time() - t0,
+                )
 
         # Eval
         if (step + 1) % eval_every_steps == 0 or step == total_steps - 1:
@@ -282,36 +327,42 @@ def main(argv: list[str] | None = None) -> None:
                 dist.all_reduce(t, op=dist.ReduceOp.AVG)
                 val_metrics["val_loss"] = float(t.item())
             if rank == 0:
-                row = {"step": step, "tokens": cumulative_tokens, **val_metrics}
+                row = {
+                    "step": step,
+                    "tokens": cumulative_tokens,
+                    "wall_clock_s": time.time() - t0,
+                    **val_metrics,
+                }
                 print(json.dumps({"event": "val", **row}))
                 metrics_f.write(json.dumps({"event": "val", **row}) + "\n")
                 metrics_f.flush()
-                if use_wandb:
-                    wandb.log(val_metrics, step=step)
+                wandb_utils.log_eval(wandb_handle, row)
+                last_val_loss = float(val_metrics.get("val_loss", float("nan")))
 
     # Final checkpoint
     if rank == 0:
         ckpt_path = save_ckpt(out_dir / "checkpoints", total_steps, unwrapped, optimizer, cfg, args.seed)
         print(f"[saved_ckpt] {ckpt_path}")
         metrics_f.close()
-        if use_wandb:
-            wandb.finish()
+        wandb_utils.finalize(
+            wandb_handle,
+            summary={
+                "final_val_loss": last_val_loss if last_val_loss is not None else float("nan"),
+                "final_train_loss": last_train_loss if last_train_loss is not None else float("nan"),
+                "final_step": total_steps,
+                "final_tokens": cumulative_tokens,
+                "wall_clock_s": time.time() - t0,
+                "params_total": int(unwrapped.num_parameters(exclude_embedding=False)),
+                "params_active": int(unwrapped.num_parameters(exclude_embedding=True)),
+                "global_batch_tokens": global_batch_tokens,
+                "total_steps": total_steps,
+                "world_size": world_size,
+                "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
+                "diverged": diverged_seen,
+            },
+        )
     if dist.is_initialized():
         dist.destroy_process_group()
-
-
-def _flatten_for_wandb(probe_out: dict[str, Any], prefix: str = "") -> dict[str, float]:
-    flat: dict[str, float] = {}
-    for k, v in probe_out.items():
-        key = f"{prefix}{k}"
-        if isinstance(v, dict):
-            flat.update(_flatten_for_wandb(v, prefix=key + "/"))
-        elif isinstance(v, (int, float)):
-            flat[key] = float(v)
-        elif isinstance(v, list) and v and isinstance(v[0], (int, float)):
-            flat[key + "/max"] = float(max(v))
-            flat[key + "/mean"] = float(sum(v) / len(v))
-    return flat
 
 
 if __name__ == "__main__":

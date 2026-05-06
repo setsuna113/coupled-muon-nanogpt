@@ -1,5 +1,7 @@
-# Ladder rung A0 — 60M LLaMA-shape, production scale on 4×H200.
-# Reproduces (re-runs) the dense LLaMA-60M result. ~30 min/seed at 1.2B tokens.
+# Ladder rung A0 — LLaMA-60M class (measured: 51.5M total / 25.7M non-embed).
+# Reproduces the dense LLaMA-60M-class result. ~30 min/seed at 1.2B tokens.
+# "60M" is a class label (the QZ baseline name); actual count is below 60M
+# because of tied embeddings and the SwiGLU 8/3-rounded intermediate.
 name: ladder_A0_llama60m
 
 model:
@@ -36,6 +38,3 @@ train:
     svd_interval_tokens: 100_000_000
     coupled_pair_interval_tokens: 100_000_000
     attn_logit_interval_tokens: 10_000_000
-
-run:
-  wandb: true

@@ -1,6 +1,6 @@
 """Sweep YAML → list of resolved run configs.
 
-Sweep YAML format:
+Sweep YAML format (single base):
 
     base: configs/ladder/A0_llama60m.yaml
     grid:
@@ -10,8 +10,14 @@ Sweep YAML format:
     fixed:
       run.wandb_project: "coupled-muon-ladder"
 
-Emits a JSONL file where each line is one resolved (config_overrides, seed)
-combination, ready for the launcher to consume.
+Sweep YAML format (multiple bases — for the d.3 cross-rung sweep):
+
+    bases: [configs/ladder/A1_llama125m.yaml, configs/ladder/B_gelu2mat_125m.yaml, ...]
+    grid:
+      ...
+
+Emits a JSONL file where each line is one resolved (base, overrides, seed)
+triple, ready for the launcher to consume.
 """
 from __future__ import annotations
 
@@ -25,18 +31,28 @@ from omegaconf import OmegaConf
 
 def expand(sweep_path: str | Path) -> list[dict]:
     s = OmegaConf.load(sweep_path)
-    grid = OmegaConf.to_container(s.get("grid", {}), resolve=True) or {}
-    fixed = OmegaConf.to_container(s.get("fixed", {}), resolve=True) or {}
-    base = str(s.base)
+    # resolve=False so OmegaConf interpolations like ${name} or ${optimizer.lr}
+    # in `fixed` (used by sweep YAMLs to set wandb_group per ablation cell)
+    # survive expansion as literal strings; train.py resolves them after
+    # merging with the base config.
+    grid = OmegaConf.to_container(s.get("grid", {}), resolve=False) or {}
+    fixed = OmegaConf.to_container(s.get("fixed", {}), resolve=False) or {}
+    if "bases" in s:
+        bases = [str(b) for b in OmegaConf.to_container(s.bases, resolve=True)]
+    elif "base" in s:
+        bases = [str(s.base)]
+    else:
+        raise ValueError(f"sweep YAML must define `base:` or `bases:` ({sweep_path})")
 
     keys = list(grid.keys())
     values = [list(v) for v in grid.values()]
     out = []
-    for combo in itertools.product(*values):
-        overrides = dict(zip(keys, combo, strict=True))
-        seed = int(overrides.pop("seed", 0))
-        merged = {**fixed, **overrides}
-        out.append({"base": base, "overrides": merged, "seed": seed})
+    for base in bases:
+        for combo in itertools.product(*values):
+            overrides = dict(zip(keys, combo, strict=True))
+            seed = int(overrides.pop("seed", 0))
+            merged = {**fixed, **overrides}
+            out.append({"base": base, "overrides": merged, "seed": seed})
     return out
 
 

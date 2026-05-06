@@ -1,8 +1,10 @@
-# Ladder rung B — A1 with SwiGLU → GELU 2-matrix MLP (delete the gate).
-# Tests whether coupling still helps when (down, up) is the EXACT MLP composition.
-# If the coupled gap drops B vs A1 → gate-ignoring is the issue → triple-coupling
-# becomes the highest-priority next algorithmic change (per experiment.md d.2).
-name: ladder_B_gelu2mat_125m
+# Ladder rung E — vanilla Karpathy nanoGPT shape: GELU 2-mat MLP, LayerNorm,
+# learned positional embeddings, no QK-Norm. Pure GPT-2 architecture at 125M.
+# Reference rung: dense NanoGPT with no LLaMA-isms. Per experiment.md d.2:
+# if E loses the coupled gap but C and D don't, the Karpathy-style
+# (LN+bias+learned-pos+GELU) interaction with coupling is the killer; pursue
+# via D and C diagnostics first.
+name: ladder_E_karpathy_125m
 
 model:
   hidden: 768
@@ -12,11 +14,11 @@ model:
     qk_norm: false
   mlp:
     type: gelu_2mat
-    intermediate: 3072             # 4 * 768 (GELU 2-mat default)
+    intermediate: 3072             # 4 * 768 (Karpathy default)
   norm:
-    type: rmsnorm
+    type: layernorm
   pos_emb:
-    type: rope
+    type: learned
 
 optimizer:
   type: coupled_muon_v2

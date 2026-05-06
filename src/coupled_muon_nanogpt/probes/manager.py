@@ -22,6 +22,9 @@ class ProbeSpec:
     name: str
     fn: ProbeFn
     interval_tokens: int
+    # If True, the probe must fire BEFORE optimizer.zero_grad() — it consumes
+    # `.grad` tensors directly. Per-expert grad-norm probes need this.
+    needs_grads: bool = False
     last_fire_tokens: int = 0
 
 
@@ -29,8 +32,18 @@ class ProbeManager:
     def __init__(self):
         self._probes: list[ProbeSpec] = []
 
-    def register(self, name: str, fn: ProbeFn, interval_tokens: int) -> None:
-        self._probes.append(ProbeSpec(name=name, fn=fn, interval_tokens=interval_tokens))
+    def register(
+        self,
+        name: str,
+        fn: ProbeFn,
+        interval_tokens: int,
+        needs_grads: bool = False,
+    ) -> None:
+        self._probes.append(
+            ProbeSpec(
+                name=name, fn=fn, interval_tokens=interval_tokens, needs_grads=needs_grads
+            )
+        )
 
     def maybe_fire(
         self,
@@ -38,10 +51,18 @@ class ProbeManager:
         optimizer: torch.optim.Optimizer,
         cumulative_tokens: int,
         ctx: dict[str, Any] | None = None,
+        *,
+        needs_grads: bool | None = None,
     ) -> dict[str, Any]:
+        """Fire all probes whose interval has elapsed. If `needs_grads` is None
+        (default), all probes are eligible. If True/False, restrict to that
+        partition — used by train.py to fire grad-needing probes between
+        backward and optimizer.step()."""
         ctx = ctx or {}
         out: dict[str, Any] = {}
         for spec in self._probes:
+            if needs_grads is not None and spec.needs_grads != needs_grads:
+                continue
             if cumulative_tokens - spec.last_fire_tokens >= spec.interval_tokens:
                 out[spec.name] = spec.fn(model, optimizer, ctx)
                 spec.last_fire_tokens = cumulative_tokens

@@ -1,0 +1,62 @@
+# Ladder rung J — I with router under AdamW (instead of the default Muon).
+#
+# Background — the router-optimizer literature is NOT unanimous (experiment.md
+# c.3 was rewritten):
+#   - Moonlight (2502.16982 §2.2) and Cerebras nanoMoE put MoE routers under
+#     Muon (`ndim>=2 and not embed and not lm_head`).
+#   - DeepSeek-V2/V3 and OLMoE use AdamW for everything (no Muon at all).
+#   - This study's default is router → Muon (matches Moonlight/Cerebras).
+#
+# Rung J ablates AdamW-routed routers against the default. Hypothesis: small,
+# near-degenerate router matrices (rank ≤ num_experts) sit in Moonlight's
+# "max(A,B) too small" regime where Muon-style updates can be noisy; AdamW's
+# coordinate-wise normalisation may be more stable here.
+# Decision rule: if J shows a coupled-vs-Muon gap larger than I, the
+# Muon-router default is hurting; if J degrades or NaNs, the default stands.
+# Measured: 322M total / 283M non-embed (matches I for controlled comparison).
+name: ladder_J_router_adamw
+
+model:
+  hidden: 768
+  n_layers: 12
+  attn:
+    n_heads: 12
+    qk_norm: true
+  mlp:
+    type: swiglu
+    intermediate: 2048
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 8
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_coef: 0.01
+    z_loss_coef: 1.0e-3
+    balancing_type: aux_loss
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+  couple_router_to_muon: false   # the J ablation knob: route MoE router → AdamW
+
+train:
+  total_tokens: 5_000_000_000
+  seq_len: 2048
+  local_batch_size: 8
+  grad_accum_steps: 8
+  warmup_steps: 500
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 500_000_000
+    coupled_pair_interval_tokens: 500_000_000
+    attn_logit_interval_tokens: 50_000_000
+    moe_load_interval_tokens: 50_000_000

@@ -1,0 +1,56 @@
+# Ladder rung N — 4 experts, top-2; per-expert intermediate doubled (4096).
+# Stress test for the OPPOSITE regime: per-expert intermediate ≈ dense MLP
+# size. Per experiment.md c.1: this is closer to Moonlight's "large matrix"
+# regime where coupled effects should be more pronounced (less noise floor).
+# Useful as a control: if rung M shows coupled gap drops vs rung N, the failure
+# is per-expert SNR (small-matrix regime).
+# Measured: 322M total (matches I; per-expert ff doubled, num_experts halved).
+name: ladder_N_4experts
+
+model:
+  hidden: 768
+  n_layers: 12
+  attn:
+    n_heads: 12
+    qk_norm: true
+  mlp:
+    type: swiglu
+    intermediate: 2048            # dense MLP same as I (controlled comparison)
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 4
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_coef: 0.01
+    z_loss_coef: 1.0e-3
+    balancing_type: aux_loss
+    intermediate: 4096            # per-expert intermediate doubled vs I (2048).
+                                  # E×ff stays constant (4×4096 = 8×2048),
+                                  # pushing into the large-matrix regime.
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+  couple_router_to_muon: true   # default; rung N varies *expert count*, not router.
+
+train:
+  total_tokens: 5_000_000_000
+  seq_len: 2048
+  local_batch_size: 8
+  grad_accum_steps: 8
+  warmup_steps: 500
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 500_000_000
+    coupled_pair_interval_tokens: 500_000_000
+    attn_logit_interval_tokens: 50_000_000
+    moe_load_interval_tokens: 50_000_000

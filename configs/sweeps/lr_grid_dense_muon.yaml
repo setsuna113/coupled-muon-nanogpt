@@ -1,0 +1,25 @@
+# d.3 telescoping LR sweep — Muon family (Muon and Coupled Muon v2),
+# dense ladder rungs A1, B, C, D, E, G, H. (A0 separately because of size class
+# difference; AdamW grids live in lr_grid_dense_adamw.yaml because their base
+# LRs differ by ~50× and a single 5-point grid can't span both.)
+#
+# Per Essential AI 2505.02222 + experiment.md d.3:
+#   Muon family LRs: {1e-3, 3e-3, 1e-2, 3e-2, 1e-1}
+#   3 seeds per (rung × optimizer × lr) cell; bootstrap CI on median final loss.
+#
+# To expand:  python -m coupled_muon_nanogpt.sweep.expand configs/sweeps/lr_grid_dense_muon.yaml
+# To run:     python scripts/run_sweep.py sweep_jobs.jsonl
+bases:
+  - configs/ladder/A1_llama125m.yaml
+  - configs/ladder/B_gelu2mat_125m.yaml
+  - configs/ladder/C_learnedpos_125m.yaml
+  - configs/ladder/D_layernorm_125m.yaml
+  - configs/ladder/E_karpathy_125m.yaml
+  - configs/ladder/G_qknorm_125m.yaml
+  - configs/ladder/H_modded_dense_125m.yaml
+grid:
+  optimizer.type: [muon, coupled_muon_v2]
+  optimizer.lr: [1.0e-3, 3.0e-3, 1.0e-2, 3.0e-2, 1.0e-1]
+  seed: [0, 1, 2]
+fixed:
+  run.wandb_project: coupled-muon-ladder

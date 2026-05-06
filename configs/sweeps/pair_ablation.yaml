@@ -1,0 +1,18 @@
+# d.4 rows 2–4: which pair carries the coupled gain? Toggle (Q-K, V-O, up-down)
+# independently and observe which subset reproduces the LLaMA-60M result.
+# 8 cells (2³). 3 seeds each.
+base: configs/ladder/A1_llama125m.yaml
+grid:
+  optimizer.couple_qk: [false, true]
+  optimizer.couple_vo: [false, true]
+  optimizer.couple_updown: [false, true]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.lr: 3.0e-3
+  optimizer.coupled_steps: 4
+  run.wandb_project: coupled-muon-ablation
+  # Group by the couple_* triple so the 8 ablation cells slot into 8 separate
+  # wandb groups (3 seeds each auto-aggregate). The fallback formula in
+  # wandb_utils only varies on rung/optimizer/lr — those are constant here.
+  run.wandb_group: "${name}/pair_qk${optimizer.couple_qk}_vo${optimizer.couple_vo}_ud${optimizer.couple_updown}"

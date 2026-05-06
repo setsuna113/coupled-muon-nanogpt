@@ -1,0 +1,55 @@
+# I' smoke — tiny MoE-with-ReLU²-experts variant for fast end-to-end coverage.
+# Mirrors I_moe_smoke.yaml structure but flips MLP type to relu2 to exercise
+# the every-other-MoE + ReLU²-experts code path that ladder rung I' uses.
+name: smoke_I_prime_moe
+
+data:
+  shard_dir: data/synthetic_smoke
+
+model:
+  hidden: 256
+  n_layers: 4
+  attn:
+    n_heads: 4
+    qk_norm: true
+  mlp:
+    type: relu2
+    intermediate: 1024            # 4 × 256, ReLU²-2mat default
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 4
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_coef: 0.01
+    z_loss_coef: 1.0e-3
+    balancing_type: aux_loss
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+  couple_router_to_muon: true
+
+train:
+  total_tokens: 5_000_000
+  seq_len: 1024
+  local_batch_size: 4
+  grad_accum_steps: 1
+  warmup_steps: 50
+  log_every_steps: 5
+  eval_every_steps: 100
+  val_tokens: 200_000
+  probes:
+    svd_interval_tokens: 0
+    coupled_pair_interval_tokens: 0
+    attn_logit_interval_tokens: 0
+    moe_load_interval_tokens: 500_000
+
+run:
+  wandb: false

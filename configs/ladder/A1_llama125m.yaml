@@ -36,6 +36,3 @@ train:
     svd_interval_tokens: 200_000_000
     coupled_pair_interval_tokens: 200_000_000
     attn_logit_interval_tokens: 20_000_000
-
-run:
-  wandb: true

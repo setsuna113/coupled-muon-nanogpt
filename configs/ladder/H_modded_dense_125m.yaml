@@ -1,0 +1,45 @@
+# Ladder rung H — modded-nanogpt-style dense baseline at 125M.
+# G + ReLU² 2-mat MLP. RMSNorm + RoPE + QK-Norm + ReLU². The closest dense
+# rung to the modded-nanogpt baseline (without the value-embedding / U-net /
+# smear-gate accretion). Last dense rung before MoE.
+# Per experiment.md d.2 stage 3 decision rule: if coupling helps on H but not
+# on the MoE rung I → MoE-specific (per-expert SNR, gate omission, inter-expert
+# competition); if coupling already disappears on H → QK-Norm × Q-K interaction
+# (modify the Q-K coupled formula to account for post-norm geometry, or drop
+# Q-K coupling on QK-Norm architectures).
+name: ladder_H_modded_dense_125m
+
+model:
+  hidden: 768
+  n_layers: 12
+  attn:
+    n_heads: 12
+    qk_norm: true
+  mlp:
+    type: relu2
+    intermediate: 3072            # ReLU² uses 4× hidden, modded-style
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+
+train:
+  total_tokens: 2_500_000_000
+  seq_len: 2048
+  local_batch_size: 16
+  grad_accum_steps: 4
+  warmup_steps: 300
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 200_000_000
+    coupled_pair_interval_tokens: 200_000_000
+    attn_logit_interval_tokens: 20_000_000

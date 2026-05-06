@@ -1,0 +1,64 @@
+# Ladder rung K — I with DeepSeek-V2 §3.2 aux-loss-free balancing.
+# Replaces the load-balancing aux loss with the offline sign-rule bias update
+# on `router_bias` (model/moe.py update_router_bias).
+#
+# **Scope of what K actually tests** (clearer than experiment.md c.4 implies):
+#   The Switch-Transformer-style aux loss in this codebase uses
+#       aux = E · Σ_i Pi · stop_grad(fi)
+#   so its gradient flows ONLY to the router (through Pi); fi is no-grad.
+#   Therefore aux loss directly contaminates **router** gradients, not the
+#   expert MLP weights. Rung K isolates the *router-side* contamination
+#   hypothesis from c.4. The broader claim in c.4 — that aux loss flows back
+#   to W_up/W_down/W_gate — would require an aux formulation that depends on
+#   expert *activations* (e.g. magnitude-of-output regularisation). That is
+#   a separate experiment, not what K tests as built.
+# Decision rule: if K shows nonzero coupled gap improvement vs I, *router-side*
+# aux contamination (not expert-side) is a real failure mode.
+# Measured: 322M total / 283M non-embed (matches I for controlled comparison).
+name: ladder_K_deepseek_bias
+
+model:
+  hidden: 768
+  n_layers: 12
+  attn:
+    n_heads: 12
+    qk_norm: true
+  mlp:
+    type: swiglu
+    intermediate: 2048
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 8
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_coef: 0.0            # disabled: DeepSeek-bias does balancing offline
+    z_loss_coef: 1.0e-3
+    balancing_type: deepseek_bias
+    bias_update_lr: 1.0e-3        # DeepSeek-V2 reports γ ≈ 1e-3 works well
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+  couple_router_to_muon: true   # default; rung K varies *balancing* not router optimizer.
+
+train:
+  total_tokens: 5_000_000_000
+  seq_len: 2048
+  local_batch_size: 8
+  grad_accum_steps: 8
+  warmup_steps: 500
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 500_000_000
+    coupled_pair_interval_tokens: 500_000_000
+    attn_logit_interval_tokens: 50_000_000
+    moe_load_interval_tokens: 50_000_000

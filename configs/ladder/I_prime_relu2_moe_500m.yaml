@@ -1,0 +1,65 @@
+# Ladder rung I' — H with MoE (every-other-layer, 8 experts top-2), but
+# experts inherit ReLU² 2-mat from H. This is the FIRST MoE rung in the
+# ladder under the I' → I refactoring (experiment.md d.2):
+#   H  → I'  : MoE introduction alone (single axis: dense → MoE), with
+#              activation held fixed at ReLU². Tests whether MoE-introduction
+#              by itself kills the coupled-vs-Muon gap.
+#   I' → I   : SwiGLU experts on the same MoE topology. Tests the gate-
+#              omission-under-routing hypothesis (c.2). If gap survives at I'
+#              but dies at I, the gate-omission story is confirmed.
+#
+# Per experiment.md a.3/b.2: ReLU² 2-mat has no learnable gate, so coupled
+# (down, up) captures the entire learnable composition (modulo activation
+# Jacobian). This rung is "MoE without the gate complication".
+#
+# Measured: ~322M total / ~283M non-embed (matches I; per-expert ff inflated
+# from 2048 to 3072 to match ReLU²-2mat default of 4·hidden, vs SwiGLU's
+# 8/3·hidden).
+name: ladder_I_prime_relu2_moe
+
+model:
+  hidden: 768
+  n_layers: 12
+  attn:
+    n_heads: 12
+    qk_norm: true                 # modded-style baseline (carried from H)
+  mlp:
+    type: relu2                   # carried from H
+    intermediate: 3072            # 4 × 768, ReLU²-2mat default (carried from H)
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 8                # same topology as I/J/K/M/N
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_coef: 0.01
+    z_loss_coef: 1.0e-3
+    balancing_type: aux_loss
+    # `intermediate: 0` ⇒ inherit `mlp.intermediate` (3072), so per-expert ff
+    # matches the dense ReLU² MLP — same active-parameter recipe as I.
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+  couple_router_to_muon: true   # default; matches Moonlight 2502.16982 §2.2.
+
+train:
+  total_tokens: 5_000_000_000
+  seq_len: 2048
+  local_batch_size: 8
+  grad_accum_steps: 8
+  warmup_steps: 500
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 500_000_000
+    coupled_pair_interval_tokens: 500_000_000
+    attn_logit_interval_tokens: 50_000_000
+    moe_load_interval_tokens: 50_000_000

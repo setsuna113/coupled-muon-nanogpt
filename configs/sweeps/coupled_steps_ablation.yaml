@@ -1,0 +1,15 @@
+# d.4 row 1 ablation: coupled_steps ∈ {0, 1, 2, 4, 8}. Step=0 must reproduce
+# plain Muon (Stage 1.1 fix); progressing values isolate the marginal benefit
+# of coupling. Run on the cleanest dense rung (A1) to start.
+base: configs/ladder/A1_llama125m.yaml
+grid:
+  optimizer.coupled_steps: [0, 1, 2, 4, 8]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.lr: 3.0e-3              # use single LR; per-LR sweep is a separate job
+  run.wandb_project: coupled-muon-ablation
+  # Group by coupled_steps so each step value (0/1/2/4/8) gets its own wandb
+  # group with seeds auto-aggregated. The fallback formula doesn't separate
+  # coupled_steps cells.
+  run.wandb_group: "${name}/cs${optimizer.coupled_steps}"

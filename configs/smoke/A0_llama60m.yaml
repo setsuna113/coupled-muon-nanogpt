@@ -1,6 +1,10 @@
 # 60M LLaMA-shape smoke on 1×4090. Validates Coupled Muon v2 end-to-end with probes.
 # Matches the QZ baseline architecture (RMSNorm + RoPE + SwiGLU, MHA, no QK-Norm).
+# Uses synthetic shards by default — override with --override data.shard_dir=... for FineWeb.
 name: smoke_A0_llama60m
+
+data:
+  shard_dir: data/synthetic_smoke
 
 model:
   hidden: 512

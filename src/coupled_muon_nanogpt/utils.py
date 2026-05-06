@@ -86,19 +86,13 @@ def save_ckpt(
     return path
 
 
-def load_ckpt(path: Path, model: torch.nn.Module, optimizer: torch.optim.Optimizer, cfg: Any) -> dict[str, Any]:
+def load_model_only(path: Path, model: torch.nn.Module) -> dict[str, Any]:
+    """Load model weights without touching the optimizer.
+
+    Used by analysis tools (e.g. expert-SNR CLI) that need to re-run forward+
+    backward on a checkpointed model but never call optimizer.step()."""
     payload = torch.load(path, map_location="cpu", weights_only=False)
-    saved_meta = payload.get("optimizer_meta", {})
-    cur_meta = optimizer_meta(cfg)
-    for k in ("type", "ns_steps", "coupled_steps", "couple_qk", "couple_vo", "couple_updown"):
-        if saved_meta.get(k) != cur_meta.get(k):
-            raise RuntimeError(
-                f"Optimizer-stamp mismatch on resume: saved {k}={saved_meta.get(k)!r} "
-                f"vs current {k}={cur_meta.get(k)!r}. Per Moonlight (experiment.md d.6.1) "
-                f"silently mixed optimizer states corrupt training; refusing to load."
-            )
     model.load_state_dict(payload["model"], strict=True)
-    optimizer.load_state_dict(payload["optimizer"])
     return payload
 
 

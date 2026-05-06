@@ -32,6 +32,7 @@ class Muon(torch.optim.Optimizer):
         ns_steps: int = 5,
         adamw_betas: tuple[float, float] = (0.95, 0.95),
         adamw_eps: float = 1e-8,
+        ns_dtype: torch.dtype = torch.bfloat16,
     ):
         adamw_params = adamw_params or []
         defaults = dict(
@@ -45,6 +46,7 @@ class Muon(torch.optim.Optimizer):
         )
         all_params = list(muon_params) + list(adamw_params)
         super().__init__(all_params, defaults)
+        self.ns_dtype = ns_dtype
         for p in muon_params:
             assert p.ndim == 2, f"Muon expects 2D matrices, got {tuple(p.shape)}"
             self.state[p]["use_muon"] = True
@@ -79,7 +81,7 @@ class Muon(torch.optim.Optimizer):
                 buf = state["momentum_buffer"]
                 buf.mul_(momentum).add_(g)
                 g_eff = g.add(buf, alpha=momentum) if group["nesterov"] else buf
-                u = zeropower_via_newtonschulz5(g_eff, steps=ns_steps)
+                u = zeropower_via_newtonschulz5(g_eff, steps=ns_steps, dtype=self.ns_dtype)
                 adj_lr = self.adjust_lr_for_muon(lr, p.shape)
                 p.data.mul_(1 - lr * wd).add_(u, alpha=-adj_lr)
 
