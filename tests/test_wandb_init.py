@@ -107,8 +107,12 @@ def _sample_cfg(**overrides) -> Any:
     return base
 
 
-def test_init_wandb_identity(fake_wandb, tmp_path):
+def test_init_wandb_identity(fake_wandb, monkeypatch, tmp_path):
     from coupled_muon_nanogpt import wandb_utils
+
+    # Ensure a clean baseline regardless of the host environment (WANDB_MODE
+    # is set by my_env.sh on the Inspire cluster; would otherwise leak in).
+    monkeypatch.delenv("WANDB_MODE", raising=False)
 
     cfg = _sample_cfg()
     handle = wandb_utils.init_wandb(cfg, rid="ladder_A0_llama60m-s0-abc", seed=0, out_dir=tmp_path)
