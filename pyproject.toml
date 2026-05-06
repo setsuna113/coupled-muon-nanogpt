@@ -5,12 +5,12 @@ description = "Coupled Muon v2 ladder experiments on a NanoGPT-style harness"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    # Pinned to a cu124 build so the same wheel works on both the 4090 dev box
-    # (driver 12.4) and H200 training box (driver 12.8). Newer torch wheels
-    # default to cu128/cu130 which require correspondingly newer drivers; on
-    # Inspire Studio those wheels silently fall back to CPU. Hopper (sm_90)
-    # is supported by cu124, so H200 runs at full speed.
-    "torch>=2.5,<2.7",
+    # Pinned to a cu128 build for the H200 training box (driver 12.8).
+    # cu128 wheels exist for torch 2.7+; we cap below the cu130-default releases
+    # (torch 2.11+) so `uv sync` picks the latest cu128-compatible build.
+    # Note: the 4090 dev box requires driver R570+ for cu128; if it lags,
+    # bump its driver or run on the H200 box only.
+    "torch>=2.7,<2.10",
     "omegaconf>=2.3",
     "tiktoken>=0.7",
     "wandb>=0.18",
@@ -31,15 +31,15 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# Force uv to resolve `torch` against the PyTorch cu124 index instead of PyPI
-# (which serves cu128/cu130 builds for newer torch versions).
+# Force uv to resolve `torch` against the PyTorch cu128 index instead of PyPI
+# (which currently defaults to cu130 builds requiring driver R580+).
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu124" }
+torch = { index = "pytorch-cu128" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/coupled_muon_nanogpt"]
