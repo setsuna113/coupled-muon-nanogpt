@@ -1,7 +1,9 @@
-# Ladder rung A0 — LLaMA-60M class (measured: 51.5M total / 25.7M non-embed).
-# Reproduces the dense LLaMA-60M-class result. ~30 min/seed at 1.2B tokens.
+# Ladder rung A0 — LLaMA-60M Common-Size baseline (measured: 51.5M total / 25.7M non-embed).
+# Reproduces the dense LLaMA-60M-class result. ~1 h/seed at 1.2B tokens on 2×H200.
 # "60M" is a class label (the QZ baseline name); actual count is below 60M
 # because of tied embeddings and the SwiGLU 8/3-rounded intermediate.
+# This is the canonical 60M Common-Size shape (hidden=512, n_layers=8, n_heads=8)
+# that every dense rung A0–H and every MoE-rung dense backbone share.
 name: ladder_A0_llama60m
 
 model:
@@ -29,7 +31,7 @@ train:
   total_tokens: 1_200_000_000      # ≈ 20× Chinchilla for 60M
   seq_len: 2048
   local_batch_size: 16             # per H200, with grad-accum to hit 0.5M tokens/step
-  grad_accum_steps: 8              # 2× of original (4-GPU value was 4); doubled for 2× H200 to keep ~0.5M global batch
+  grad_accum_steps: 8              # global batch ≈ 0.5M tokens (world_size 2 × local_batch 16 × seq_len 2048 × 8)
   warmup_steps: 200
   log_every_steps: 25
   eval_every_steps: 500

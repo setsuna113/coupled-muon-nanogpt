@@ -14,7 +14,7 @@ auto-fired training-loop probe.
 
 Usage:
     python -m coupled_muon_nanogpt.probes.expert_snr \\
-        --config configs/ladder/I_moe_500m.yaml \\
+        --config configs/ladder/I_moe.yaml \\
         --ckpt results/<run_id>/checkpoints/step_<n>_*.pt \\
         --num_micro 32 \\
         --out snr_report.json

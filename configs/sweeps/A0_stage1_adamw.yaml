@@ -5,7 +5,7 @@
 # AdamW LR grid per d.3 + Essential AI 2505.02222: 3e-5..3e-3, ~50× smaller
 # than the Muon family — that's why AdamW gets its own sweep YAML.
 #
-# Cost: ~30 min/seed/cell on 4×H200 × 25 cells = ~12.5 wall-clock hours
+# Cost: ~1 h/seed/cell on 2×H200 × 25 cells = ~25 wall-clock hours
 # sequential (~50 GPU-h).
 base: configs/ladder/A0_llama60m.yaml
 grid:

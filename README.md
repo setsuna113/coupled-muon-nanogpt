@@ -17,8 +17,8 @@ bash scripts/prepare_data.sh
 # 3. Smoke test on 1×4090 (5 min)
 bash scripts/smoke_4090.sh configs/smoke/tiny_dev.yaml
 
-# 4. Production run on 4×H200
-bash scripts/train_4xh200.sh configs/ladder/A0_llama60m.yaml
+# 4. Production run on 2×H200
+bash scripts/train_2xh200.sh configs/ladder/A0_llama60m.yaml
 ```
 
 ## Configs are the experiment unit
@@ -62,10 +62,9 @@ Optimizer side:
 |---|---|---|---|
 | `smoke/tiny_dev` | ~10M | ~5 min | 1×4090 |
 | `smoke/A0_llama60m` | ~100M | ~30 min | 1×4090 |
-| `ladder/A0_llama60m` | 1.2B | ~30 min/seed | 4×H200 |
-| `ladder/A1_llama125m` | 2.5B | ~1.5 h/seed | 4×H200 |
-| `ladder/B_gelu2mat_125m` | 2.5B | ~1.5 h/seed | 4×H200 |
-| `ladder/I_moe_500m` | 5B | ~8 h/seed | 4×H200 |
+| `ladder/A0_llama60m` (60M-CS, all dense rungs collapse to this shape) | 1.2B | ~1 h/seed | 2×H200 |
+| `ladder/B_gelu2mat` (representative dense ablation rung; LR-sweep base) | 2.5B | ~2 h/seed | 2×H200 |
+| `ladder/I_moe` (~112M total / ~60M active) | 5B | ~3.5 h/seed | 2×H200 |
 
 ## Repo layout
 
@@ -78,7 +77,7 @@ src/coupled_muon_nanogpt/
   probes/       svd, coupled_pair, attn_logit, ns_internal
   sweep/        expand, telescoping
   train.py · eval.py · utils.py
-scripts/        smoke_4090.sh, train_4xh200.sh, prepare_data.sh
+scripts/        smoke_4090.sh, train_2xh200.sh, prepare_data.sh, prepare_synthetic.sh, run_sweep.py
 tests/          pair classification, toggle combinations, ckpt stamp
 ```
 
@@ -102,10 +101,10 @@ the default step axis.
 
 ```bash
 # Online (training nodes with internet):
-torchrun --nproc_per_node=4 -m coupled_muon_nanogpt.train --config configs/ladder/A0_llama60m.yaml --seed 0
+torchrun --nproc_per_node=2 -m coupled_muon_nanogpt.train --config configs/ladder/A0_llama60m.yaml --seed 0
 
 # Offline (training nodes without internet — recommended workflow):
-WANDB_MODE=offline torchrun --nproc_per_node=4 -m coupled_muon_nanogpt.train --config configs/ladder/A0_llama60m.yaml --seed 0
+WANDB_MODE=offline torchrun --nproc_per_node=2 -m coupled_muon_nanogpt.train --config configs/ladder/A0_llama60m.yaml --seed 0
 
 # Sync from a machine with internet (after offline training completes):
 wandb sync results/<run_id>/wandb/

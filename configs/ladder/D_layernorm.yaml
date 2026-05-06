@@ -1,20 +1,21 @@
 # Ladder rung D — C with RMSNorm → LayerNorm (with bias). Inherits C's
 # GELU 2-mat MLP and learned positional embeddings.
+# 60M Common-Size (hidden=512, n_layers=8, n_heads=8) — same shape as A0.
 # Per experiment.md b.3 RMSNorm vs LayerNorm should not materially change
 # coupled-Muon's gradient geometry. If D loses the coupled gap relative to C,
 # the bias LR (1D params under AdamW; bias LR tied to matrix LR) is the prime
 # suspect.
-name: ladder_D_layernorm_125m
+name: ladder_D_layernorm
 
 model:
-  hidden: 768
-  n_layers: 12
+  hidden: 512
+  n_layers: 8
   attn:
-    n_heads: 12
+    n_heads: 8
     qk_norm: false
   mlp:
     type: gelu_2mat               # continues from C
-    intermediate: 3072
+    intermediate: 2048
   norm:
     type: layernorm
   pos_emb:
@@ -31,7 +32,7 @@ train:
   total_tokens: 2_500_000_000
   seq_len: 2048
   local_batch_size: 16
-  grad_accum_steps: 8              # 2× of original (4-GPU value was 4); doubled for 2× H200 to keep ~0.5M global batch
+  grad_accum_steps: 8              # global batch ≈ 0.5M tokens (world_size 2 × local_batch 16 × seq_len 2048 × 8)
   warmup_steps: 300
   log_every_steps: 25
   eval_every_steps: 1000

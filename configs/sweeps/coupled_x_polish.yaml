@@ -10,11 +10,12 @@
 # table only varies one axis at a time; this YAML adds the joint cell.
 #
 # Cells: (coupled_steps × final_polish) = (5 × 2) = 10. With seeds × LR=fixed,
-# 30 runs total at A1 (125M dense). The coupled_steps=0 cell is technically
+# 30 runs total at A0 (60M-CS dense; A1 was dropped after the size collapse
+# since it was shape-identical to A0). The coupled_steps=0 cell is technically
 # degenerate w.r.t. final_polish (no stage 1 to skip; both branches collapse
 # to plain Muon) but we keep both values for symmetry — they should produce
 # identical loss curves and serve as a numerical-equality check.
-base: configs/ladder/A1_llama125m.yaml
+base: configs/ladder/A0_llama60m.yaml
 grid:
   optimizer.coupled_steps: [0, 1, 2, 4, 8]
   optimizer.final_polish: [false, true]

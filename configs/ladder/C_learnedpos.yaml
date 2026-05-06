@@ -1,21 +1,22 @@
 # Ladder rung C — B with RoPE → learned positional embeddings.
+# 60M Common-Size (hidden=512, n_layers=8, n_heads=8) — same shape as A0.
 # Per experiment.md d.2: C continues from B (GELU 2-mat MLP) with the only
 # *new* change being pos_emb. Tests whether Q-K coupling effect survives
 # without RoPE block reshape. With learned-pos there is no 2-D rotation
 # block structure for Q-K, so the optimizer factory disables `use_multi_head`
 # entirely (the V-O multi-head reshape isn't RoPE-dependent but the QK one is;
 # the simplest correctness move is to disable both — see factory.py guard).
-name: ladder_C_learnedpos_125m
+name: ladder_C_learnedpos
 
 model:
-  hidden: 768
-  n_layers: 12
+  hidden: 512
+  n_layers: 8
   attn:
-    n_heads: 12
+    n_heads: 8
     qk_norm: false
   mlp:
     type: gelu_2mat               # continues from B
-    intermediate: 3072            # 4 × 768, GELU-2mat default
+    intermediate: 2048            # 4 × 512, GELU-2mat default
   norm:
     type: rmsnorm
   pos_emb:
@@ -32,7 +33,7 @@ train:
   total_tokens: 2_500_000_000
   seq_len: 2048
   local_batch_size: 16
-  grad_accum_steps: 8              # 2× of original (4-GPU value was 4); doubled for 2× H200 to keep ~0.5M global batch
+  grad_accum_steps: 8              # global batch ≈ 0.5M tokens (world_size 2 × local_batch 16 × seq_len 2048 × 8)
   warmup_steps: 300
   log_every_steps: 25
   eval_every_steps: 1000

@@ -1,19 +1,22 @@
-# Ladder rung M — 16 experts, top-2; per-expert intermediate halved.
+# Ladder rung M — 16 experts, top-2; per-expert intermediate halved vs I.
+# 60M Common-Size dense backbone (hidden=512, n_layers=8, n_heads=8) — same
+# shape as I; only `num_experts` and per-expert `intermediate` change.
 # Stress test for Moonlight's "max(A,B) too small" failure regime
 # (experiment.md c.1). Expect coupled-NS noise amplification through the
 # partner weight when per-expert effective batch shrinks to 12.5% of global.
-# Measured: 322M total (matches I; per-expert ff halved, num_experts doubled).
+# At 60M-CS this regime is more aggressive than the original 768-hidden ladder:
+# max(512, 704) = 704 vs max(768, 1024) = 1024.
 name: ladder_M_16experts
 
 model:
-  hidden: 768
-  n_layers: 12
+  hidden: 512
+  n_layers: 8
   attn:
-    n_heads: 12
+    n_heads: 8
     qk_norm: true
   mlp:
     type: swiglu
-    intermediate: 2048            # dense MLP same as I (controlled comparison)
+    intermediate: 1408            # dense MLP same as I (controlled comparison)
   norm:
     type: rmsnorm
   pos_emb:
@@ -26,8 +29,8 @@ model:
     aux_loss_coef: 0.01
     z_loss_coef: 1.0e-3
     balancing_type: aux_loss
-    intermediate: 1024            # per-expert intermediate halved vs I (2048).
-                                  # E×ff stays constant (16×1024 = 8×2048),
+    intermediate: 704             # per-expert intermediate halved vs I (1408).
+                                  # E×ff stays constant (16×704 = 8×1408 = 11264),
                                   # pushing into Moonlight's small-matrix regime.
 
 optimizer:
@@ -42,7 +45,7 @@ train:
   total_tokens: 5_000_000_000
   seq_len: 2048
   local_batch_size: 4               # smaller per-step due to larger E
-  grad_accum_steps: 32              # 2× of original (4-GPU value was 16); doubled for 2× H200 to keep ~0.5M global batch
+  grad_accum_steps: 32              # global batch ≈ 0.5M tokens (rung M: world_size 2 × local_batch 4 × seq_len 2048 × 32)
   warmup_steps: 500
   log_every_steps: 25
   eval_every_steps: 1000

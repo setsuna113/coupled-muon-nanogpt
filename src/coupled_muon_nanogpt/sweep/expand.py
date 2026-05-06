@@ -12,7 +12,7 @@ Sweep YAML format (single base):
 
 Sweep YAML format (multiple bases — for the d.3 cross-rung sweep):
 
-    bases: [configs/ladder/A1_llama125m.yaml, configs/ladder/B_gelu2mat_125m.yaml, ...]
+    bases: [configs/ladder/B_gelu2mat.yaml, configs/ladder/C_learnedpos.yaml, ...]
     grid:
       ...
 

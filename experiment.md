@@ -126,7 +126,7 @@ But MoE introduces a third regime: **per-expert intermediate dim is typically sm
 - **Equal-active-parameter** matching (most production MoE): `d_expert_ff ≈ d_ff_dense / top_k`, so a token sees roughly the same FFN compute as in the dense baseline. For (d_model=768, d_ff_dense=3072, top_k=2), each expert is `(768, 1536)`.
 - **Equal-total-parameter** matching: `d_expert_ff ≈ d_ff_dense / E`, so the total parameter count matches the dense baseline. Same setup with E=8 gives expert shape `(768, 384)`.
 
-The configs in this study (rungs I/M/N) hold *total expert capacity* `E × d_expert_ff` constant: I has 8 experts × 2048 = 16384, M has 16 × 1024 = 16384, N has 4 × 4096 = 16384. So per-expert width varies as 1024 → 2048 → 4096 across M → I → N — sweeping the small-vs-large per-expert regime while controlling for total MoE capacity.
+The configs in this study (rungs I/M/N) hold *total expert capacity* `E × d_expert_ff` constant at the dense-FF target `8/3 · hidden = 11264` (matching the same dense-to-per-expert ratio the original 768-hidden ladder used). I has 8 × 1408 = 11264, M has 16 × 704 = 11264, N has 4 × 2816 = 11264 — per-expert width varies as 704 → 1408 → 2816 across M → I → N. **The 60M Common-Size adoption pushes M's per-expert FF down to 704, which is a more aggressive probe of Moonlight's "max(A,B) too small → instability" regime than the prior ladder's 1024 was at hidden=768 (max(512,704)=704 vs max(768,1024)=1024).**
 
 For comparison, Kimi K2 (arXiv 2507.20534) is "1.04 trillion total parameters with 32 billion activated parameters per token, 384 experts activating exactly 8 per forward pass (sparsity 48), MoE hidden dimension 2048" — production training therefore knowingly puts Muon in the small-matrix regime. Even with √max(A,B) scaling, the *effective gradient signal* in the user's smaller setup is qualitatively different:
 
@@ -206,41 +206,43 @@ For MoE, fork **Cerebras's `train_gpt_moe.py`** (a modded-nanogpt MoE port; see 
 
 ### d.2 Bridging experiment ladder
 
+Under the 2×H200 compute budget the ladder collapses to a **fixed-architecture-only** comparison: every dense rung A0–H and the dense backbone of every MoE rung I/I'/J/K/L/M/N use the same 60M Common-Size shape (hidden=512, n_layers=8, n_heads=8, head_dim=64). MoE per-expert MLP capacity is held constant via E · d_expert_ff = 11264 (SwiGLU rungs) or 16384 (ReLU², rung I' inheriting the dense `4·hidden` formula). The earlier "scale to 125M" axis (A1) is removed — A1 was shape-identical to A0 once the collapse landed, and the ablations it would have supported now route through A0 directly. Scale validation is deferred to a separate ~350M dense rung run only after the 60M-CS ladder closes. The ladder still exercises the same architectural axes (MLP arity, pos-emb, norm, QK-Norm, MoE topology) — only the size axis is muted.
+
 The ladder transforms LLaMA-60M into MoE-NanoGPT one axis per step. For *every* configuration, run `{AdamW, Muon, Coupled Muon v2}` with ≥ 3 seeds and a small LR sweep (Section d.3).
 
 ```
-A0  LLaMA-60M baseline (your existing config)              [reproduces the 60M result]
-A1  LLaMA-60M, scaled to 125M (depth 2× or width 1.41×)    [check coupled effect persists at scale]
-B   A1 with SwiGLU → GELU 2-matrix MLP (delete W_gate)     [does coupling still help when (down,up) is the EXACT composition?]
+A0  LLaMA-60M-CS baseline (your existing config)           [reproduces the 60M result; canonical 60M-CS shape (hidden=512, n_layers=8, n_heads=8)]
+B   A0 with SwiGLU → GELU 2-matrix MLP (delete W_gate)     [does coupling still help when (down,up) is the EXACT composition?]
 C   B with RoPE → learned positional embeddings            [does Q–K coupling effect survive without RoPE block reshape?]
 D   C with RMSNorm → LayerNorm + biases                    [Karpathy regime; AdamW LR more transferable]
 E   D ≈ Karpathy nanoGPT (vanilla GPT-2-style)             [reference: dense NanoGPT, no LLaMA-isms]
 
---- now go in the OTHER direction from A1 ---
+--- now go in the OTHER direction from A0 ---
 
-G   A1 with QK-Norm ON                                     [isolate QK-Norm × Q–K coupling interaction]
+G   A0 with QK-Norm ON                                     [isolate QK-Norm × Q–K coupling interaction]
 H   G with ReLU² activation                                [modded-nanogpt-style dense: 2-mat MLP + RMSNorm + QK-Norm + RoPE]
 H'  H with rope_partial_frac=0.5                           [optional follow-up: faithful modded-nanogpt 50% RoPE; forces flat-2D Q-K coupling fallback — see note]
 
---- now sparse MoE ---
+--- now sparse MoE; all share H's 60M-CS dense backbone ---
 
 I'  H with MoE (every-other-layer, 8 experts top-2, capacity 1.25, aux 0.01,
     z 1e-3); router under Muon (default, per c.3). Experts inherit ReLU² 2-mat
-    from H — no SwiGLU gate complication.
+    from H at I_expert = 4·hidden = 2048 (matches dense FF) — no SwiGLU gate complication.
     [first MoE rung: tests MoE-introduction alone, single-axis change vs H]
-I   I' with experts → SwiGLU (and dense MLP → SwiGLU)
+I   I' with experts → SwiGLU (and dense MLP → SwiGLU); per-expert SwiGLU at
+    I_expert = 1408 (= 8/3·512), matching dense FF and yielding E·I_expert = 11264.
     [tests gate-omission-under-routing on MoE; closer to production recipe]
 J   I with router under AdamW                              [router-optimizer ablation]
 K   I with auxiliary-loss-free balancing (DeepSeek bias-update style; Trinity SMEBU)
 L   I with shared expert (1 always-on + 8 routed top-1)    [DeepSeekMoE-style; reduces per-expert variance. 9 expert MLPs/layer total — kept symmetric with I/J/K/M/N (which all have 8 routed) so the comparison is across a single axis (presence of shared expert)]
-M   I with 16 experts top-2 (smaller per-expert intermediate)   [stress test small-matrix regime]
-N   I with 4 experts top-2 (bigger per-expert intermediate)     [stress test large-matrix regime]
+M   I with 16 experts top-2 (per-expert I_expert = 704)    [stress test small-matrix regime; max(512,704)=704 is more aggressive than the prior 1024 at hidden=768]
+N   I with 4 experts top-2 (per-expert I_expert = 2816)    [stress test large-matrix regime; per-expert FF 2× the dense FF]
 ```
 
 Expected localisation rules:
-- If the coupled gap drops between **B and A1** → the gate-ignoring approximation is the issue. Fix by adding gate to a triple coupling, e.g. `(down, up, gate)` joint NS.
+- If the coupled gap drops between **B and A0** (MLP-arity axis only — same 60M-CS shape) → the gate-ignoring approximation is the issue. Fix by adding gate to a triple coupling, e.g. `(down, up, gate)` joint NS.
 - If it drops between **C and B** → the RoPE block reshape was crucial; investigate whether the partial-RoPE / no-RoPE Q–K coupled formula is even well-defined. Note: the implementation auto-falls-back to flat-2D Q–K coupling whenever `pos_emb.type=learned` *or* `rope_partial_frac<1.0` (no per-head 2-D rotation pair exists in those cases), so C/D/E and any partial-RoPE rung silently lose the multi-head Q-K branch.
-- If it drops between **G and A1** (QK-Norm-on vs LLaMA) → Q–K coupling and QK-Norm are doing the same job; one is redundant, prefer QK-Norm.
+- If it drops between **G and A0** (QK-Norm-on vs LLaMA) → Q–K coupling and QK-Norm are doing the same job; one is redundant, prefer QK-Norm.
 - If H matches G and H' (partial RoPE) underperforms H → the multi-head Q-K branch is doing real work, and partial RoPE on modded-style architectures defeats it.
 - If gap survives all the way to **H** but dies at **I'** → MoE-introduction itself is the issue (per-expert SNR, inter-expert competition; Section c.5). Pursue Section d.4 ablations.
 - If gap survives at **I'** but dies at **I** → the SwiGLU gate-omission-under-routing hypothesis (Section c.2) is confirmed. The triple `(down, up, gate)` coupling becomes the highest-priority Phase-2 algorithmic change.
@@ -254,7 +256,7 @@ Expected localisation rules:
 
 Coupled Muon's extra matmul-heavy optimizer step (~9 NS iterates per coupled parameter per step — see d.6.9) means the two axes diverge: the wall-clock crossover may favour Muon even where the sample-efficiency crossover favours Coupled Muon. Both numbers are real results; the design is fair only if both are reported. Aggregate the LR sweep by reporting the *envelope* on each axis (the tuned-best loss curve at each token / wall-clock budget), per Essential AI (arXiv 2505.02222) protocol.
 
-Use FineWeb-Edu val for dense (target loss ≈ 3.20–3.30 at 125M dense) and a held-out FineWeb subset for MoE (same loss target as the dense model with equal *active* params).
+Use FineWeb-Edu val for dense (target loss in the 3.4–3.6 band at 60M-CS, slightly higher than the 3.20–3.30 a 125M dense recipe would reach at the same token budget) and a held-out FineWeb subset for MoE (same loss target as the dense model with equal *active* params).
 
 **Per-optimizer LR sweep.** LRs are NOT transferable across optimizers (Lakernewhouse, "Understanding Muon": "Muon works well with learning rate around 0.02"; Liu & Hong 2025: optimal LR shifts with NS precision). Use the **telescoping sweep** from Essential AI (arXiv 2505.02222):
 - 6-point log-spaced LR grid at the smallest model size (60M).
@@ -293,44 +295,47 @@ Use FineWeb-Edu val for dense (target loss ≈ 3.20–3.30 at 125M dense) and a 
 | **Router optimizer**: Muon (default) vs AdamW (rung J) vs Coupled-Muon-on-router | Default is Muon (Section c.3). Rung J ablates AdamW. Coupled-Muon-on-router (i.e. pairing the router with one of the experts) is a Phase-2 variant — out of scope for the immediate ladder. |
 | **MoE z-loss on/off + aux-loss-free balancing** | Aux-loss-free balancing (DeepSeek bias updates) removes LB-grad contamination of expert weights; should make coupled Muon "more itself". If coupled Muon improves under aux-loss-free routing relative to with-aux-loss, that's strong evidence that LB-grad contamination is the killer. |
 | **Couple within active subset only** | Mask the gradient G_A by tokens that actually routed to the expert before NS; reduces noise floor. |
+| **Per-expert max(A,B) regime check** | At 60M-CS, M has max(512, 704)=704 (small-matrix Moonlight regime); N has max(512, 2816)=2816 (large-matrix). Confirm Muon's `√max(A,B)` scaling is applied per-expert in the optimizer factory before treating M's "small-matrix stress" as a real signal vs an unscaled-LR artefact. |
 
-### d.5 Specific 4×H200 configs
+### d.5 Specific 2×H200 configs
 
-H200 has 141 GB HBM3e at 4.8 TB/s, ~1.4× H100 throughput on bf16 GEMM. With FlashAttention-3, plan ~150 K tok/s/H200 for 125M dense. 4×H200 ≈ 600 K tok/s aggregate at 125M dense, ~250–300 K tok/s at 350M dense, ~250–300 K tok/s for an MoE at 320M total / 70M active under simple expert-parallel data-parallel.
+H200 has 141 GB HBM3e at 4.8 TB/s, ~1.4× H100 throughput on bf16 GEMM. With FlashAttention-3, plan ~150 K tok/s/H200 for 60M-CS dense. 2×H200 ≈ 300 K tok/s aggregate at 60M-CS dense, ~150 K tok/s aggregate at the deferred 350M dense validation rung, ~150 K tok/s for the ~112M-total / ~60M-active MoE class.
 
-**Note on actual model sizes.** The size labels below are the *class* the rung tests, not exact param counts. After the every-other-MoE fix and the separated dense-vs-per-expert intermediate, the measured sizes from the implementation are:
+**Note on actual model sizes.** The size labels below are the *class* the rung tests, not exact param counts. Under the 60M Common-Size collapse (hidden=512, n_layers=8, n_heads=8) all dense rungs share a single shape and all MoE rungs share a single dense backbone with proportionally scaled experts. Measured sizes from the implementation:
 
-| Rung class | Spec target | Measured (12 layers, hidden=768, every-other) | Notes |
+| Rung class | Spec target | Measured (8 layers, hidden=512, every-other) | Notes |
 |---|---|---|---|
-| A0 | 60M | 51.5M | tied embed + SwiGLU 8/3-rounded ff = 60M class, sub-60M actual |
-| A1, B, G, H | 125M | 124M | matches spec |
-| C, D, E | 125M | 125.2M (slightly bigger: learned-pos embedding) | matches spec |
-| I, J, K, M, N | 500M total / 125M active | **322M total / ~70M active** | every-other and a 12-layer × 768-hidden recipe can't reach 500M; to genuinely hit it requires either ~20 layers, hidden=896, or 14+ experts |
-| L (shared expert) | — | 350M | 9 expert MLPs/MoE layer (8 routed + 1 shared) |
-| 350M dense validation | 350M | not specified — pick recipe at the time |
+| A0 (SwiGLU) | 60M | 51.5M | tied embed + SwiGLU 8/3-rounded ff = 60M class, sub-60M actual |
+| B, H (2-mat MLP) | 60M | 50.9M | GELU/ReLU² intermediate = 4·hidden = 2048; tied embed |
+| C, D, E (2-mat + learned-pos / LN / Karpathy) | 60M | 52.0M | learned pos-emb adds ~1.05M (2048×512); otherwise same as B |
+| G (SwiGLU + QK-Norm) | 60M | 51.5M | QK-Norm scales are tiny |
+| I, J, K, M, N (SwiGLU MoE) | 60M-CS backbone, E·I_expert = 11264 | 112.0M total / ~60M active | 4 dense + 4 MoE layers (every-other); per-expert SwiGLU at 1408 (I/J/K), 704 (M), 2816 (N) |
+| I' (ReLU² MoE) | 60M-CS backbone, E·I_expert = 16384 | 109.7M total / ~58M active | per-expert ReLU² 2-mat at I_expert = 4·hidden = 2048 (matches dense); E=8 |
+| L (shared expert) | 60M-CS backbone | 120.7M total | 8 routed top-1 + 1 shared SwiGLU expert at 1408 each |
+| 350M dense validation | 350M | not specified — pick recipe at the time | deferred until 60M-CS ladder closes; original "hidden=1024, n_layers=18" recipe still ~350M |
 
-**Compute estimates revised to measured sizes:**
+**Compute estimates revised to 60M-CS sizes on 2×H200:**
 
-| Config | Params | Tokens | Wall-clock on 4×H200 | Comment |
+| Config | Params | Tokens | Wall-clock on 2×H200 | Comment |
 |---|---|---|---|---|
-| 60M-class LLaMA (A0) | 51M | 1.2B (Chinchilla 20×) | ~30 min/seed | Reproduce existing result; 5 seeds; cheap. Adds a `final_polish ∈ {True,False}` × 3 LRs × 3 seeds ablation row (~9 extra runs ≈ ~5 GPU-h). |
-| 125M dense ladder rung (A1–H, optional H') | 124M | 2.5B | ~1.5 h/seed | 8–9 rungs × 3 optimizers × 3 seeds × 5 LRs ≈ ~360 runs; total ~540 GPU-h. |
-| 350M dense (validation rung) | 350M | 7B | ~9 h/seed | Run once on the **best** (config × optimizer) from the 125M ladder. Specify recipe (hidden=1024, n_layers=18 hits ~350M) when planning. |
-| MoE rung I' (ReLU² experts) | 322M / ~70M active | 5B | ~6 h/seed | New rung between H and I (d.2). Same per-token cost as I; ~250 GPU-h for 3 optimizers × 3 seeds × 5 LRs. |
-| MoE class I, J, K, M, N | 322M / ~70M active | 5B | ~6 h/seed | Same per-token cost as 320M dense; less than the 8h/seed budget the original spec carried for "500M". |
-| MoE class L (with shared expert) | 350M | 5B | ~6.5 h/seed | Slightly bigger due to always-on expert. |
-| MoE diagnostic (d.4 ablations) | 322M / ~70M active | 1B | ~1.2 h/seed | Short-run ablations; loss at fixed token count rather than convergence. |
+| 60M-CS LLaMA (A0) | 51M | 1.2B (≈20× Chinchilla) | ~1 h/seed | Reproduce existing result; 5 seeds; ~5 GPU-h. Adds `final_polish ∈ {True,False}` × 3 LRs × 3 seeds (~9 runs ≈ ~9 GPU-h). |
+| 60M-CS dense ladder rung (B–H, optional H') | ~51M | 2.5B | ~2 h/seed | 7 rungs × 3 optimizers × 3 seeds × 5 LRs ≈ ~315 runs; total ~630 GPU-h on 2×H200. |
+| 350M dense (validation rung; deferred) | 350M | 7B | ~18 h/seed | Run once on the **best** (config × optimizer) from the 60M-CS ladder. Out of immediate 2×H200 budget. |
+| MoE rung I' (ReLU² experts) | ~110M / ~58M active | 5B | ~3.5 h/seed | First MoE rung between H and I (d.2). 3 optimizers × 3 seeds × 5 LRs ≈ ~150 GPU-h. |
+| MoE class I, J, K, M, N | ~112M / ~60M active | 5B | ~3.5–4 h/seed | 5 rungs × 3 optimizers × 3 seeds × 5 LRs ≈ ~750 GPU-h. |
+| MoE class L (with shared expert) | ~121M | 5B | ~4 h/seed | Slightly bigger: extra always-on expert per MoE block. |
+| MoE diagnostic (d.4 ablations) | ~112M / ~60M active | 1B | ~50 min/seed | Short-run ablations at fixed token count. |
 
-If the 500M-total target is essential (e.g. to reach the regime where Wen et al.'s 1.3× Muon gap is empirically demonstrated rather than extrapolated), commit to one of these recipes:
+If the 350M+ scale-up rung is commissioned (e.g. to reach the regime where Wen et al.'s 1.3× Muon gap is empirically demonstrated rather than extrapolated), commit to one of these recipes for the dense or MoE upper bound:
 - `n_layers: 20, hidden: 768` → ~510M total / ~110M active
 - `n_layers: 12, hidden: 896, intermediate: 2389 (8/3 of hidden)` → ~480M total
 - `n_layers: 12, hidden: 768, num_experts: 14` → ~510M total
 
-Each adds 30–50 % to wall-clock vs the 322M recipe; rebudget accordingly.
+Each adds 30–50 % to wall-clock vs the deferred 350M dense recipe; rebudget on 2×H200 accordingly.
 
 **Sequence length:** 2048 throughout. **Global batch:** 0.5M tokens (gradient accumulation as needed). Essential AI's analysis says Muon's relative advantage *grows* at large batch — but at 0.5M you're already in the regime where the literature's 1.3–1.5× gap is observed, and you avoid the under-tuned-AdamW critique that plagues the 0.02M-batch Moonlight numbers (Wen et al. flag this directly).
 
-**Total compute budget estimate:** ~2650 GPU-hours across the full ladder + ablations at the 322M MoE class — adds ~250 GPU-h for the new I' rung over the original ~2400 GPU-h estimate. On 4×H200 = ~28 wall-clock days. Add ~1000 GPU-h if you commit to a true 500M MoE recipe. Cut to 60M-only ladder + spot validation (still includes A0 + the `final_polish` ablation, ~35 GPU-h total) if budget is tighter.
+**Total compute budget estimate:** ~**1300 GPU-hours** across the full 60M-CS ladder + ablations — roughly half the original 4×H200 figure because the dense ladder shrinks from 124M to ~51M params (compute is roughly param-linear at this scale) and the MoE ladder shrinks from ~322M total to ~112M total. On 2×H200 = ~27 wall-clock days at full sequential utilisation. Cut to A0-only + spot validation (~25 GPU-h: AdamW 25 cells + Muon-family 50 cells × ~1 h/seed at 1.2B tokens, plus the 9-run final_polish ablation) if budget is tighter. The deferred 350M dense rung adds ~50–100 GPU-h on top whenever it runs.
 
 ### d.6 Common pitfalls and confounders
 

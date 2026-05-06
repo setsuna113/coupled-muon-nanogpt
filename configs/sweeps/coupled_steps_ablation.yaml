@@ -1,7 +1,8 @@
 # d.4 row 1 ablation: coupled_steps ∈ {0, 1, 2, 4, 8}. Step=0 must reproduce
 # plain Muon (Stage 1.1 fix); progressing values isolate the marginal benefit
-# of coupling. Run on the cleanest dense rung (A1) to start.
-base: configs/ladder/A1_llama125m.yaml
+# of coupling. Run on A0 (the canonical 60M-CS dense rung; A1 was dropped after
+# the size collapse since it was shape-identical to A0).
+base: configs/ladder/A0_llama60m.yaml
 grid:
   optimizer.coupled_steps: [0, 1, 2, 4, 8]
   seed: [0, 1, 2]

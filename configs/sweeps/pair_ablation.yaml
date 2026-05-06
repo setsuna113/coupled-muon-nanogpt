@@ -1,7 +1,8 @@
 # d.4 rows 2–4: which pair carries the coupled gain? Toggle (Q-K, V-O, up-down)
 # independently and observe which subset reproduces the LLaMA-60M result.
-# 8 cells (2³). 3 seeds each.
-base: configs/ladder/A1_llama125m.yaml
+# 8 cells (2³). 3 seeds each. Runs on A0 (60M-CS dense; A1 was dropped after
+# the size collapse since it was shape-identical to A0).
+base: configs/ladder/A0_llama60m.yaml
 grid:
   optimizer.couple_qk: [false, true]
   optimizer.couple_vo: [false, true]

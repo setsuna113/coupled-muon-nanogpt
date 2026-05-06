@@ -1,18 +1,19 @@
-# Ladder rung B — A1 with SwiGLU → GELU 2-matrix MLP (delete the gate).
+# Ladder rung B — A0 with SwiGLU → GELU 2-matrix MLP (delete the gate).
+# 60M Common-Size (hidden=512, n_layers=8, n_heads=8) — same shape as A0.
 # Tests whether coupling still helps when (down, up) is the EXACT MLP composition.
-# If the coupled gap drops B vs A1 → gate-ignoring is the issue → triple-coupling
+# If the coupled gap drops B vs A0 → gate-ignoring is the issue → triple-coupling
 # becomes the highest-priority next algorithmic change (per experiment.md d.2).
-name: ladder_B_gelu2mat_125m
+name: ladder_B_gelu2mat
 
 model:
-  hidden: 768
-  n_layers: 12
+  hidden: 512
+  n_layers: 8
   attn:
-    n_heads: 12
+    n_heads: 8
     qk_norm: false
   mlp:
     type: gelu_2mat
-    intermediate: 3072             # 4 * 768 (GELU 2-mat default)
+    intermediate: 2048             # 4 * 512 (GELU 2-mat default)
   norm:
     type: rmsnorm
   pos_emb:
@@ -29,7 +30,7 @@ train:
   total_tokens: 2_500_000_000
   seq_len: 2048
   local_batch_size: 16
-  grad_accum_steps: 8              # 2× of original (4-GPU value was 4); doubled for 2× H200 to keep ~0.5M global batch
+  grad_accum_steps: 8              # global batch ≈ 0.5M tokens (world_size 2 × local_batch 16 × seq_len 2048 × 8)
   warmup_steps: 300
   log_every_steps: 25
   eval_every_steps: 1000

@@ -1,7 +1,8 @@
 # d.3 telescoping LR sweep — Muon family (Muon and Coupled Muon v2),
-# dense ladder rungs A1, B, C, D, E, G, H. (A0 separately because of size class
-# difference; AdamW grids live in lr_grid_dense_adamw.yaml because their base
-# LRs differ by ~50× and a single 5-point grid can't span both.)
+# dense ladder rungs B, C, D, E, G, H (60M-CS Common-Size; A1 dropped after
+# the size collapse since it was shape-identical to A0; A0 has its own
+# Stage 1 sweep yamls). AdamW grids live in lr_grid_dense_adamw.yaml because
+# their base LRs differ by ~50× and a single 5-point grid can't span both.
 #
 # Per Essential AI 2505.02222 + experiment.md d.3:
 #   Muon family LRs: {1e-3, 3e-3, 1e-2, 3e-2, 1e-1}
@@ -10,13 +11,12 @@
 # To expand:  python -m coupled_muon_nanogpt.sweep.expand configs/sweeps/lr_grid_dense_muon.yaml
 # To run:     python scripts/run_sweep.py sweep_jobs.jsonl
 bases:
-  - configs/ladder/A1_llama125m.yaml
-  - configs/ladder/B_gelu2mat_125m.yaml
-  - configs/ladder/C_learnedpos_125m.yaml
-  - configs/ladder/D_layernorm_125m.yaml
-  - configs/ladder/E_karpathy_125m.yaml
-  - configs/ladder/G_qknorm_125m.yaml
-  - configs/ladder/H_modded_dense_125m.yaml
+  - configs/ladder/B_gelu2mat.yaml
+  - configs/ladder/C_learnedpos.yaml
+  - configs/ladder/D_layernorm.yaml
+  - configs/ladder/E_karpathy.yaml
+  - configs/ladder/G_qknorm.yaml
+  - configs/ladder/H_modded_dense.yaml
 grid:
   optimizer.type: [muon, coupled_muon_v2]
   optimizer.lr: [1.0e-3, 3.0e-3, 1.0e-2, 3.0e-2, 1.0e-1]

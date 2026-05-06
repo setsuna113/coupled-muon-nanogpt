@@ -231,9 +231,9 @@ def test_mode_resolution_cfg_overrides_env(fake_wandb, monkeypatch, tmp_path):
 def test_explicit_wandb_group_overrides_fallback(fake_wandb, tmp_path):
     from coupled_muon_nanogpt import wandb_utils
 
-    cfg = _sample_cfg(run={"wandb_group": "ladder_A1/pair_truefalsetrue"})
+    cfg = _sample_cfg(run={"wandb_group": "ladder_A0/pair_truefalsetrue"})
     wandb_utils.init_wandb(cfg, rid="rid", seed=0, out_dir=tmp_path)
-    assert fake_wandb.init_calls[-1]["group"] == "ladder_A1/pair_truefalsetrue"
+    assert fake_wandb.init_calls[-1]["group"] == "ladder_A0/pair_truefalsetrue"
 
 
 def test_probe_flatten_attn_logit_per_layer(fake_wandb, tmp_path):

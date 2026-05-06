@@ -9,7 +9,7 @@
 # (5 points). AdamW LRs differ by ~50× and live in A0_stage1_adamw.yaml so
 # a single grid doesn't waste cells.
 #
-# Cost: ~30 min/seed/cell on 4×H200 × 50 cells = ~25 wall-clock hours sequential
+# Cost: ~1 h/seed/cell on 2×H200 × 50 cells = ~50 wall-clock hours sequential
 # (~100 GPU-h). Add A0_stage1_adamw.yaml's 25 runs for the full Stage 1.
 base: configs/ladder/A0_llama60m.yaml
 grid:

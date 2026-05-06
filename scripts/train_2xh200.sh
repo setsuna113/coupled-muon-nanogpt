@@ -4,7 +4,8 @@
 #
 # Ladder yamls' grad_accum_steps is sized for this 2-GPU rig — global batch
 # stays at ~0.5M tokens/step (the d.3 protocol target). For a different GPU
-# count, override grad_accum_steps via --override or use scripts/train_4xh200.sh.
+# count, override grad_accum_steps via --override (e.g. `--override
+# train.grad_accum_steps=4` on 4 GPUs to halve it back to 0.5M).
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then

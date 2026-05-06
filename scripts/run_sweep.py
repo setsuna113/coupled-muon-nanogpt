@@ -9,7 +9,7 @@ useful than discarding the whole sweep.
 
 Usage:
     python scripts/run_sweep.py sweep_jobs.jsonl
-    python scripts/run_sweep.py sweep_jobs.jsonl --nproc-per-node 4 --start-from 12
+    python scripts/run_sweep.py sweep_jobs.jsonl --nproc-per-node 2 --start-from 12
     python scripts/run_sweep.py sweep_jobs.jsonl --dry-run
 """
 from __future__ import annotations

@@ -1,13 +1,15 @@
-# MoE LR sweep across rungs I, J, K, L, M, N. 5 seeds per d.6.8 because
-# different router init produces different per-expert load and therefore
-# different Muon dynamics; MoE results need more seeds than dense to converge.
+# MoE LR sweep across rungs I', I, J, K, L, M, N (60M-CS Common-Size dense
+# backbone; per-expert MLP scaled per d.5). 5 seeds per d.6.8 because different
+# router init produces different per-expert load and therefore different Muon
+# dynamics; MoE results need more seeds than dense to converge.
 bases:
-  - configs/ladder/I_moe_500m.yaml
-  - configs/ladder/J_router_muon_500m.yaml
-  - configs/ladder/K_deepseek_bias_500m.yaml
-  - configs/ladder/L_shared_expert_500m.yaml
-  - configs/ladder/M_16experts_500m.yaml
-  - configs/ladder/N_4experts_500m.yaml
+  - configs/ladder/I_prime_relu2_moe.yaml
+  - configs/ladder/I_moe.yaml
+  - configs/ladder/J_router_adamw.yaml
+  - configs/ladder/K_deepseek_bias.yaml
+  - configs/ladder/L_shared_expert.yaml
+  - configs/ladder/M_16experts.yaml
+  - configs/ladder/N_4experts.yaml
 grid:
   optimizer.type: [muon, coupled_muon_v2]
   optimizer.lr: [1.0e-3, 3.0e-3, 1.0e-2, 3.0e-2, 1.0e-1]

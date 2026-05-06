@@ -1,4 +1,6 @@
 # Ladder rung J — I with router under AdamW (instead of the default Muon).
+# 60M Common-Size dense backbone (hidden=512, n_layers=8, n_heads=8) — same
+# shape as I; only `couple_router_to_muon` differs.
 #
 # Background — the router-optimizer literature is NOT unanimous (experiment.md
 # c.3 was rewritten):
@@ -13,18 +15,17 @@
 # coordinate-wise normalisation may be more stable here.
 # Decision rule: if J shows a coupled-vs-Muon gap larger than I, the
 # Muon-router default is hurting; if J degrades or NaNs, the default stands.
-# Measured: 322M total / 283M non-embed (matches I for controlled comparison).
 name: ladder_J_router_adamw
 
 model:
-  hidden: 768
-  n_layers: 12
+  hidden: 512
+  n_layers: 8
   attn:
-    n_heads: 12
+    n_heads: 8
     qk_norm: true
   mlp:
     type: swiglu
-    intermediate: 2048
+    intermediate: 1408              # matches I (and A0)
   norm:
     type: rmsnorm
   pos_emb:
@@ -50,7 +51,7 @@ train:
   total_tokens: 5_000_000_000
   seq_len: 2048
   local_batch_size: 8
-  grad_accum_steps: 16              # 2× of original (4-GPU value was 8); doubled for 2× H200 to keep ~0.5M global batch
+  grad_accum_steps: 16              # global batch ≈ 0.5M tokens (MoE: world_size 2 × local_batch 8 × seq_len 2048 × 16)
   warmup_steps: 500
   log_every_steps: 25
   eval_every_steps: 1000
