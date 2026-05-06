@@ -13,10 +13,11 @@ __pycache__/
 .vscode/
 .DS_Store
 
-# Project artifacts
-data/
-results/
-wandb/
+# Project artifacts (repo-root only — leading slash so `data/` doesn't also
+# swallow the `src/coupled_muon_nanogpt/data/` subpackage).
+/data/
+/results/
+/wandb/
 *.bin
 *.pt
 *.ckpt
