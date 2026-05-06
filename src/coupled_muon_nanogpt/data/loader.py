@@ -33,7 +33,15 @@ class ShardDataLoader:
 
         self.shards = sorted(self.shard_dir.glob("shard_*.bin"))
         if not self.shards:
-            raise FileNotFoundError(f"No shards found under {self.shard_dir}")
+            hint = (
+                "bash scripts/prepare_synthetic.sh"
+                if "synthetic" in str(self.shard_dir)
+                else "bash scripts/prepare_data.sh"
+            )
+            raise FileNotFoundError(
+                f"No shards found under {self.shard_dir}. "
+                f"Generate them first with: {hint}"
+            )
         self._mmap_current: np.memmap | None = None
         self._shard_cursor = 0
         self._token_cursor = 0
