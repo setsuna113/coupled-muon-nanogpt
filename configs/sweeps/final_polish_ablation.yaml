@@ -1,0 +1,30 @@
+# d.4 row 1 ablation: does Stage 2 (the trailing zeropower NS pass after the
+# coupled kernel) do real work, or is it approximately a no-op because
+# stage-1's output is already near-orthogonal at the operating point?
+#
+# Per experiment.md d.5 A0 budget line: "Adds a `final_polish ∈ {True,False}`
+# × 3 LRs × 3 seeds ablation row (~9 extra runs ≈ ~5 GPU-h)."
+#
+# Run on A0 (the cleanest dense rung that reproduces the LLaMA-60M baseline).
+# Pair this with the post-stage-1 `‖X‖_spec` probe (ns_internal_interval_tokens > 0)
+# to triangulate: if σ_max ≈ 1 across pairs AND `final_polish=False` matches
+# `True` on loss, Stage 2 is approximately a no-op and the algorithm can
+# simplify to one stage.
+base: configs/ladder/A0_llama60m.yaml
+grid:
+  optimizer.final_polish: [false, true]
+  optimizer.lr: [1.0e-3, 3.0e-3, 1.0e-2]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.coupled_steps: 4
+  optimizer.ns_steps: 5
+  run.wandb_project: coupled-muon-ablation
+  # Group by polish flag so {true, false} cells are two distinct wandb groups
+  # (3 LRs × 3 seeds = 9 runs each); seeds within a (polish, lr) cell still
+  # auto-aggregate via wandb's run-grouping on `group + name + lr`.
+  run.wandb_group: "${name}/polish_${optimizer.final_polish}_lr${optimizer.lr}"
+  # Turn on the post-stage-1 spectral-norm probe so the ablation is self-
+  # diagnosing: σ_max(stage1) ≈ 1 ⇒ Stage 2 is redundant; far from 1 ⇒ Stage 2
+  # is doing real work.
+  train.probes.ns_internal_interval_tokens: 100_000_000

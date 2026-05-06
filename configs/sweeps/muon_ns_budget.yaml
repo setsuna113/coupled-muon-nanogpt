@@ -1,0 +1,28 @@
+# Compute-matched-orthogonalization-budget control for plain Muon.
+#
+# Coupled Muon v2 default is 4 + 5 = 9 NS matmul passes per coupled-pair
+# parameter per step (experiment.md d.6.9). Plain Muon is 5 passes. A reader
+# of the loss-vs-wall-clock plot might object: "Of course coupling looks
+# better per-token; you're spending more NS work per step." This sweep
+# isolates whether the extra NS passes themselves help — i.e. it answers
+# "does plain Muon at 9 NS steps match plain Muon at 5?"
+#
+# Expected outcome (per zeropower_via_newtonschulz5 design — see coupled_muon.py:11-19):
+# the (3.4445, -4.7750, 2.0315) quintic was tuned to land the iterate inside
+# the [0.5, 1.5] singular-value band by step 5; further iterations tighten σ→1
+# but don't change update direction. Training loss should be flat in ns_steps
+# above 5. If it isn't, that's a real signal and the coupled-vs-Muon comparison
+# needs a third reference column (Muon @ ns_steps_eq_coupled).
+#
+# Cheap to run: A0 (60M class), 2 NS values × 3 LRs × 3 seeds = 18 runs ≈ ~10 GPU-h.
+base: configs/ladder/A0_llama60m.yaml
+grid:
+  optimizer.ns_steps: [5, 9]
+  optimizer.lr: [1.0e-3, 3.0e-3, 1.0e-2]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: muon
+  run.wandb_project: coupled-muon-ablation
+  # Group on (ns_steps, lr) so the two NS-budget bands plot side-by-side
+  # in the wandb UI.
+  run.wandb_group: "${name}/muon_ns${optimizer.ns_steps}_lr${optimizer.lr}"

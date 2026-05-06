@@ -1,0 +1,16 @@
+# Stage 1 reproduction (experiment.md): A0 LLaMA-60M-class baseline with AdamW.
+# 5 seeds × 5 LRs = 25 runs. Run alongside A0_stage1_muon.yaml; together they
+# constitute the Stage 1 reproduction gate.
+#
+# AdamW LR grid per d.3 + Essential AI 2505.02222: 3e-5..3e-3, ~50× smaller
+# than the Muon family — that's why AdamW gets its own sweep YAML.
+#
+# Cost: ~30 min/seed/cell on 4×H200 × 25 cells = ~12.5 wall-clock hours
+# sequential (~50 GPU-h).
+base: configs/ladder/A0_llama60m.yaml
+grid:
+  optimizer.type: [adamw]
+  optimizer.lr: [3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3]
+  seed: [0, 1, 2, 3, 4]
+fixed:
+  run.wandb_project: coupled-muon-A0-repro

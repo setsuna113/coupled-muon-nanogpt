@@ -50,7 +50,7 @@ train:
   total_tokens: 5_000_000_000
   seq_len: 2048
   local_batch_size: 8
-  grad_accum_steps: 8
+  grad_accum_steps: 16              # 2× of original (4-GPU value was 8); doubled for 2× H200 to keep ~0.5M global batch
   warmup_steps: 500
   log_every_steps: 25
   eval_every_steps: 1000

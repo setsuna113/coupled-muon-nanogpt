@@ -29,7 +29,7 @@ train:
   total_tokens: 1_200_000_000      # ≈ 20× Chinchilla for 60M
   seq_len: 2048
   local_batch_size: 16             # per H200, with grad-accum to hit 0.5M tokens/step
-  grad_accum_steps: 4              # global = 16 × 2048 × 4 GPUs × 4 accum ≈ 0.524M
+  grad_accum_steps: 8              # 2× of original (4-GPU value was 4); doubled for 2× H200 to keep ~0.5M global batch
   warmup_steps: 200
   log_every_steps: 25
   eval_every_steps: 500
