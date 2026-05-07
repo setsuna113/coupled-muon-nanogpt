@@ -40,10 +40,17 @@ import time
 from pathlib import Path
 
 
-def _job_to_argv(job: dict, nproc: int, repo_root: Path) -> list[str]:
+def _job_to_argv(
+    job: dict,
+    nproc: int,
+    repo_root: Path,
+    extra_overrides: list[str] | None = None,
+) -> list[str]:
     overrides = []
     for k, v in job["overrides"].items():
         overrides += ["--override", f"{k}={v}"]
+    for ov in extra_overrides or []:
+        overrides += ["--override", ov]
     cmd = [
         "torchrun",
         "--standalone",
@@ -82,7 +89,7 @@ def _run_one(
     total: int,
     tag: str,
 ) -> bool | None:
-    cmd = _job_to_argv(job, args.gpus_per_worker, repo_root)
+    cmd = _job_to_argv(job, args.gpus_per_worker, repo_root, args.extra_override)
     printable = " ".join(shlex.quote(c) for c in cmd)
     prefix = f"[{tag} {i + 1}/{total}]" if tag else f"[{i + 1}/{total}]"
     print(f"\n{prefix} {printable}", flush=True)
@@ -102,7 +109,7 @@ def _run_one(
         run_id = _stream(proc, provisional_log, to_stdout=(args.num_workers == 1))
         ret = proc.wait()
         if run_id:
-            final_log = repo_root / "results" / run_id / "stdout.log"
+            final_log = Path(args.results_dir) / run_id / "stdout.log"
             final_log.parent.mkdir(parents=True, exist_ok=True)
             provisional_log.replace(final_log)
         if ret != 0:
@@ -159,14 +166,37 @@ def main():
     p.add_argument("--start-from", type=int, default=0, help="Resume from job index N.")
     p.add_argument("--dry-run", action="store_true", help="Print commands without running.")
     p.add_argument(
+        "--results-dir",
+        type=str,
+        default=None,
+        help=(
+            "Override the per-cell `run.output_dir` AND the sweep dispatcher's "
+            "log root. Default: keep each cell's config default (usually "
+            "`./results`) and put dispatcher logs under `<results>/_sweep_logs`."
+        ),
+    )
+    p.add_argument(
+        "--extra-override",
+        action="append",
+        default=[],
+        help="Repeatable. Extra KEY=VALUE override appended to every cell.",
+    )
+    p.add_argument(
         "--log-dir",
         type=str,
-        default="results/_sweep_logs",
-        help="Directory for per-job stdout logs (used until the run-id is parsed).",
+        default=None,
+        help="Override sweep-dispatcher log dir (else `<results-dir>/_sweep_logs`).",
     )
     args = p.parse_args()
     if args.gpus_per_worker is None:
         args.gpus_per_worker = args.nproc_per_node
+    if args.results_dir is not None:
+        # Inject as a per-cell override and use it for the dispatcher's logs.
+        args.extra_override.append(f"run.output_dir={args.results_dir}")
+    else:
+        args.results_dir = "results"
+    if args.log_dir is None:
+        args.log_dir = str(Path(args.results_dir) / "_sweep_logs")
     if args.gpus_per_worker != args.nproc_per_node:
         print(
             f"WARNING: --gpus-per-worker={args.gpus_per_worker} != "
