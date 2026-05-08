@@ -108,7 +108,14 @@ def setup_ddp() -> tuple[int, int, int]:
 
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    local_rank = int(os.environ.get("LOCAL_RANK", rank % torch.cuda.device_count()))
+    # NOTE: don't use os.environ.get("LOCAL_RANK", rank % torch.cuda.device_count())
+    # — Python evaluates the default eagerly, so when CUDA isn't yet visible
+    # in the spawned subprocess (device_count() == 0) we get ZeroDivisionError
+    # even though torchrun always sets LOCAL_RANK.
+    if "LOCAL_RANK" in os.environ:
+        local_rank = int(os.environ["LOCAL_RANK"])
+    else:
+        local_rank = rank % torch.cuda.device_count()
     dist.init_process_group(backend="nccl")
     torch.cuda.set_device(local_rank)
     return rank, world_size, local_rank
