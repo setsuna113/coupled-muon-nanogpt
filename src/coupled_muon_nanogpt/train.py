@@ -254,14 +254,12 @@ def main(argv: list[str] | None = None) -> None:
 
         # Pre-step probes (those that consume `.grad` directly: per-expert grad
         # norms, etc.). Fire on `cumulative_tokens + global_batch_tokens` so
-        # tokens align with the current step's grads.
+        # tokens align with the current step's grads. Must run on every rank
+        # because probes like `moe_load_probe` issue `dist.all_reduce`; firing
+        # only on rank 0 leaves rank 1 unmatched and watchdog kills the job.
         pre_step_probe_tokens = cumulative_tokens + global_batch_tokens
-        pre_step_probe_out = (
-            probes.maybe_fire(
-                unwrapped, optimizer, pre_step_probe_tokens, ctx_for_probes, needs_grads=True
-            )
-            if rank == 0
-            else {}
+        pre_step_probe_out = probes.maybe_fire(
+            unwrapped, optimizer, pre_step_probe_tokens, ctx_for_probes, needs_grads=True
         )
 
         # Optimizer step (timed, per d.6.9).
@@ -300,12 +298,13 @@ def main(argv: list[str] | None = None) -> None:
             wandb_utils.log_step(wandb_handle, row)
             last_train_loss = float(row["loss"])
 
-        # Probes (post-step: those that don't need `.grad`).
+        # Probes (post-step: those that don't need `.grad`). Fire on every rank
+        # for the same reason as the pre-step probe; only rank 0 logs the result.
+        ctx_for_probes["max_attn_logits"] = max_logits_collect
+        probe_out = probes.maybe_fire(
+            unwrapped, optimizer, cumulative_tokens, ctx_for_probes, needs_grads=False
+        )
         if rank == 0:
-            ctx_for_probes["max_attn_logits"] = max_logits_collect
-            probe_out = probes.maybe_fire(
-                unwrapped, optimizer, cumulative_tokens, ctx_for_probes, needs_grads=False
-            )
             # Merge any pre-step (grad-needing) probe output collected before optimizer.step.
             if pre_step_probe_out:
                 probe_out = {**probe_out, **pre_step_probe_out}
