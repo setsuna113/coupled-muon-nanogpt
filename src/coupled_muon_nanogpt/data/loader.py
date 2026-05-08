@@ -77,11 +77,20 @@ class ShardDataLoader:
             self._reset_to_first_shard()
         assert self._mmap_current is not None
         end = self._token_cursor + need
-        if end > self._mmap_current.size:
+        # Skip shards too small for one batch (e.g. a partial final shard from
+        # data prep). Bail only if every shard is undersized.
+        attempts = 0
+        while end > self._mmap_current.size:
             self._advance_shard()
-            end = self._token_cursor + need
             assert self._mmap_current is not None
-            assert end <= self._mmap_current.size, "shard too small for one batch"
+            end = self._token_cursor + need
+            attempts += 1
+            if attempts > len(self.shards):
+                raise RuntimeError(
+                    f"All {len(self.shards)} shards under {self.shard_dir} are "
+                    f"smaller than one batch (need={need} uint16 tokens). "
+                    f"Re-run data prep or reduce local_batch_size/seq_len."
+                )
 
         buf = np.asarray(self._mmap_current[self._token_cursor : end], dtype=np.int64)
         # Stride to next rank's window.
