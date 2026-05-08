@@ -11,10 +11,11 @@
 set -u
 
 GLOBAL=/inspire/hdd/global_user/yanjunchi-24040/yancheng
+PROJECT=/inspire/hdd/project/quantum-artificial-intelligence/yanjunchi-24040/yancheng/coupled-muon-nanogpt/results
 
 RIGS=(
-  "stage1-A0|${CMNG_RESULTS_DIR:-results}/ladder_A0_llama60m-*|75"
-  "stage2-dense|$GLOBAL/coupled-muon-stage2-dense/*|270"
+  "stage1-A0|${CMNG_RESULTS_DIR:-$PROJECT}/ladder_A0_llama60m-*|75"
+  "stage2-dense|$GLOBAL/coupled-muon-stage2-dense-archive/*|270"
   "stage3-moe|$GLOBAL/coupled-muon-stage3-moe/*|350"
   "d4ablations|$GLOBAL/coupled-muon-d4ablations/*|105"
 )
