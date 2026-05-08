@@ -52,6 +52,15 @@ def main():
         default="",
         help="Comma-separated 0-based job indices to force-redo even if finished.",
     )
+    p.add_argument(
+        "--extra-override",
+        action="append",
+        default=[],
+        help=(
+            "Mirror run_sweep.py's --extra-override flags so the hashed cfg "
+            "matches what was actually run. Repeatable."
+        ),
+    )
     args = p.parse_args()
 
     force_redo: set[int] = set()
@@ -60,6 +69,13 @@ def main():
 
     repo_root = Path(__file__).resolve().parent.parent
     rdir = args.results_dir.resolve()
+
+    # run_sweep.py auto-appends `run.output_dir=<results_dir>` whenever
+    # --results-dir is passed; the run_id hash includes that, so we must
+    # apply the same override here or every dir will appear "missing".
+    extra: list[str] = list(args.extra_override)
+    if not any(o.startswith("run.output_dir=") for o in extra):
+        extra.append(f"run.output_dir={rdir}")
 
     with open(args.in_path) as f:
         jobs = [json.loads(line) for line in f if line.strip()]
@@ -70,6 +86,7 @@ def main():
     for i, job in enumerate(jobs):
         base_path = repo_root / job["base"]
         overrides = [f"{k}={v}" for k, v in job["overrides"].items()]
+        overrides.extend(extra)
         cfg = load_config(str(base_path), overrides)
         rid = run_id(cfg, int(job["seed"]))
 
