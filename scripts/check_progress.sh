@@ -17,6 +17,9 @@ RIGS=(
   "stage1-A0|${CMNG_RESULTS_DIR:-$PROJECT}/ladder_A0_llama60m-*|75"
   "stage2-dense|$GLOBAL/coupled-muon-stage2-dense-archive/*|270"
   "stage3-moe|$GLOBAL/coupled-muon-stage3-moe/*|350"
+  "stage3-rigB-pt1|$GLOBAL/coupled-muon-stage3-rigB-pt1/*|60"
+  "stage3-rigA-anchor-screen|$GLOBAL/coupled-muon-stage3-rigA-anchor-screen/*|105"
+  "stage3-rigB-pt3|$GLOBAL/coupled-muon-stage3-rigB-pt3/*|19"
   "d4ablations|$GLOBAL/coupled-muon-d4ablations/*|105"
 )
 

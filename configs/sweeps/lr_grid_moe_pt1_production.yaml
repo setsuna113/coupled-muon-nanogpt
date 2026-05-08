@@ -1,0 +1,20 @@
+# Stage 3 phase pt1B — Production tier on Rig B (4×H200).
+# Front-loaded for the cross-optimizer triple at rung I:
+#   bases listed I FIRST, then I' — `expand.py` emits all 30 I cells before any
+#   I' cell, so I-Muon completes ~T=1.42d and I-CoupledMuon completes ~T=2.84d.
+#   Combined with the AdamW@I anchor on Rig A (pt1A, finishes T~3.26d), the full
+#   I-triple (AdamW, Muon, CoupledMuon) is analysable by T~3.3d.
+#
+# 60 cells = 2 rungs × 2 opts × 3 LRs × 5 seeds.
+# LR triplet centered on Muon's MoE sweet-spot (~1e-2 per Bergsma 2025 / Essential
+# AI 2505.02222); telescoping on Rig B's pt3 if best lands on edge.
+# 5 seeds = production floor (experiment.md d.6.8).
+bases:
+  - configs/ladder/I_moe.yaml
+  - configs/ladder/I_prime_relu2_moe.yaml
+grid:
+  optimizer.type: [muon, coupled_muon_v2]
+  optimizer.lr: [3.0e-3, 1.0e-2, 3.0e-2]
+  seed: [0, 1, 2, 3, 4]
+fixed:
+  run.wandb_project: coupled-muon-moe-pt1-prod

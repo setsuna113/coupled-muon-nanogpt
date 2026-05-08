@@ -1,0 +1,24 @@
+# Stage 3 phase pt1A — AdamW anchor on rung I (compulsory).
+# Cross-optimizer reference at the production-style SwiGLU MoE rung. Without
+# this point, the Muon-vs-CoupledMuon comparison at the MoE class is unanchored:
+# Stage 2 covers AdamW on dense (B–H) but the architectural change at I (sparse
+# expert routing) might shift all three optimizers in unknown directions.
+#
+# 15 cells = 1 rung × 1 opt × 5 LRs × 3 seeds.
+# Full 5-point AdamW grid because AdamW base LR differs from Muon by ~50× and
+# we have no prior MoE-scale AdamW result to recenter. 3 seeds = screening
+# floor; sufficient for a calibration anchor (we're NOT claiming AdamW vs
+# Coupled-Muon — only providing the cross-optimizer reference).
+#
+# Concatenated FIRST in Rig A's queue (cat anchor.jsonl pt2_screening.jsonl
+# > rigA_anchor_then_screen.jsonl), so Rig A's 4 dispatcher workers grab AdamW
+# cells first when Stage 2 finishes (~T=2.5d). All 15 cells complete by ~T=3.26d,
+# matching the I-CoupledMuon completion on Rig B and sealing the I-triple.
+bases:
+  - configs/ladder/I_moe.yaml
+grid:
+  optimizer.type: [adamw]
+  optimizer.lr: [3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3]
+  seed: [0, 1, 2]
+fixed:
+  run.wandb_project: coupled-muon-moe-anchor-adamw

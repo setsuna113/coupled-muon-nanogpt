@@ -1,0 +1,27 @@
+# Stage 3 phase pt2 — Screening tier on Rig A (8×H100).
+# Bridges the rest of the MoE ladder: J (router=AdamW ablation), K (DeepSeek
+# aux-free balancing), L (shared expert), M (16 experts / small-FF Moonlight
+# regime), N (4 experts / large-FF). Together with the I/I' production tier
+# from pt1B, this localises which architectural axis (router optim, balancing,
+# expert topology, matrix size) absorbs or amplifies the coupled-Muon gap.
+#
+# 90 cells = 5 rungs × 2 opts × 3 LRs × 3 seeds.
+# Same Muon-family LR triplet as pt1B for direct cross-rung comparison.
+# 3 seeds = screening floor (experiment.md d.6.8) — supporting evidence, not
+# the standalone production claim.
+#
+# Queued AFTER lr_grid_moe_adamw_I.yaml on Rig A so the AdamW@I anchor cells
+# (15 of them) finish first and the cross-optimizer triple at I is sealed by
+# T~3.3d. See lr_grid_moe_pt1_production.yaml header for the timing rationale.
+bases:
+  - configs/ladder/J_router_adamw.yaml
+  - configs/ladder/K_deepseek_bias.yaml
+  - configs/ladder/L_shared_expert.yaml
+  - configs/ladder/M_16experts.yaml
+  - configs/ladder/N_4experts.yaml
+grid:
+  optimizer.type: [muon, coupled_muon_v2]
+  optimizer.lr: [3.0e-3, 1.0e-2, 3.0e-2]
+  seed: [0, 1, 2]
+fixed:
+  run.wandb_project: coupled-muon-moe-pt2-screen
