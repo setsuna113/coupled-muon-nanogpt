@@ -19,6 +19,7 @@ RIGS=(
   "stage3-moe|$GLOBAL/coupled-muon-stage3-moe/*|350"
   "stage3-rigB-pt1|$GLOBAL/coupled-muon-stage3-rigB-pt1/*|60"
   "stage3-rigA-anchor-screen|$GLOBAL/coupled-muon-stage3-rigA-anchor-screen/*|105"
+  "stage3-rig2H200-adamwIp|$GLOBAL/coupled-muon-stage3-rig2H200-adamw-Iprime/*|15"
   "stage3-rigB-pt3|$GLOBAL/coupled-muon-stage3-rigB-pt3/*|19"
   "d4ablations|$GLOBAL/coupled-muon-d4ablations/*|105"
 )
