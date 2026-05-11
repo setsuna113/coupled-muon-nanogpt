@@ -52,22 +52,51 @@ class ShardDataLoader:
         # uint16 mmap; sized automatically.
         return np.memmap(path, dtype=np.uint16, mode="r")
 
+    def _open_with_skip(self, start_idx: int) -> int:
+        """Open shard at start_idx, skipping over any missing shards.
+        Mirrors the undersized-skip path in next_batch (commit e9f9882) for
+        a shard that vanishes from the FS between glob and open — observed
+        on Inspire when a `data/` symlink is removed mid-run. Returns the
+        index of the shard that was successfully opened. Bails iff every
+        shard is unopenable."""
+        import sys
+        n = len(self.shards)
+        idx = start_idx
+        for _ in range(n):
+            try:
+                self._mmap_current = self._open_shard(idx)
+                self._shard_cursor = idx
+                return idx
+            except FileNotFoundError:
+                print(
+                    f"[loader] WARN rank={self.rank} skipping missing shard "
+                    f"{self.shards[idx]}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                idx = (idx + 1) % n if self.infinite else idx + 1
+                if not self.infinite and idx >= n:
+                    break
+        raise RuntimeError(
+            f"All {n} shards under {self.shard_dir} are missing at open "
+            f"time. Check that the `data/` symlink resolves."
+        )
+
     def _reset_to_first_shard(self):
-        self._shard_cursor = 0
-        self._mmap_current = self._open_shard(0)
+        self._open_with_skip(0)
         # Stagger starting offset by rank to keep ranks decorrelated.
         stride = self.local_batch_size * self.seq_len * self.world_size
         rank_offset = self.rank * self.local_batch_size * self.seq_len
         self._token_cursor = rank_offset % max(1, self._mmap_current.size - stride)
 
     def _advance_shard(self):
-        self._shard_cursor += 1
-        if self._shard_cursor >= len(self.shards):
+        next_idx = self._shard_cursor + 1
+        if next_idx >= len(self.shards):
             if self.infinite:
-                self._shard_cursor = 0
+                next_idx = 0
             else:
                 raise StopIteration
-        self._mmap_current = self._open_shard(self._shard_cursor)
+        self._open_with_skip(next_idx)
         self._token_cursor = self.rank * self.local_batch_size * self.seq_len
 
     def next_batch(self) -> tuple[torch.Tensor, torch.Tensor]:
