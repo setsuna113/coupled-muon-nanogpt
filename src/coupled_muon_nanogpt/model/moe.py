@@ -165,15 +165,21 @@ class MoEFFN(nn.Module):
         consumes the `.grad` tensors directly. Returns a 1-D tensor of length
         `num_experts`. Used by `probes.moe_load` to log per-expert gradient
         signal magnitudes (experiment.md d.3 "per-expert grad norm")."""
+        # `sq` must be a CUDA scalar even when the expert has no grads this
+        # step (top-k routing can leave an expert untouched in a microbatch).
+        # Initialising with `0.0` and relying on `torch.as_tensor` made the
+        # untouched-expert path produce a CPU scalar; stacking it with
+        # touched-expert CUDA scalars raised a device-mismatch RuntimeError.
+        device = self.gate_router.weight.device
         norms = []
         for expert in self.experts:
-            sq = 0.0
+            sq = torch.zeros((), device=device, dtype=torch.float32)
             for p in expert.parameters():
                 if p.grad is None:
                     continue
                 sq = sq + p.grad.detach().float().pow(2).sum()
-            norms.append(torch.as_tensor(sq).sqrt())
-        return torch.stack(norms) if norms else torch.zeros(0)
+            norms.append(sq.sqrt())
+        return torch.stack(norms) if norms else torch.zeros(0, device=device)
 
     @torch.no_grad()
     def update_router_bias(self) -> None:
