@@ -1,0 +1,27 @@
+\section{Paired-bootstrap procedure}\label{app:stats}
+
+Every confidence interval in this report is the paired-bootstrap on the median of seed-wise loss differences at each arm's own best LR. The pseudocode below mirrors \code{docs/figures/\_stats.py}; the public re-usable helper in the codebase is \code{src/coupled\_muon\_nanogpt/analysis/bootstrap.py:bootstrap\_median\_ci} (the same percentile bootstrap, single-sample).
+
+\begin{verbatim}
+def best_lr_per_arm(df, group_keys=("rung","optimizer")):
+    # Exclude diverged cells. For every (rung, opt), find the LR with the
+    # smallest median final val_loss across converged seeds.
+    work = df[~df["diverged"]]
+    by   = work.groupby([*group_keys, "lr"])["final_val_loss"].median()
+    idx  = by.groupby(group_keys).idxmin()
+    return idx.to_frame()                       # {(rung,opt): best_lr}
+
+def paired_bootstrap(df_a, df_b, on=("rung","seed"), n=10_000, alpha=0.05):
+    # df_a, df_b are restricted to one (rung, opt, best_lr) each.
+    merged = df_a.merge(df_b, on=on, suffixes=("_a","_b"), how="inner")
+    diffs  = merged.final_val_loss_a - merged.final_val_loss_b
+    rng    = np.random.default_rng(0)
+    samples = rng.integers(0, len(diffs), size=(n, len(diffs)))
+    boots   = np.median(diffs.values[samples], axis=1)
+    return (np.median(diffs), np.quantile(boots, alpha/2),
+                              np.quantile(boots, 1 - alpha/2))
+\end{verbatim}
+
+The pairing on \code{(rung, seed)} is the central methodological choice. Pairing makes the bootstrap reflect the architectural-axis correlation: when two optimizers are trained from the same seed on the same rung, their final losses are typically more correlated than two independent runs from different seeds, so the CI on the difference is narrower than $\sigma_a/\sqrt{n} + \sigma_b/\sqrt{n}$ would suggest. This is why $n=3$ paired CIs in Fig.~\ref{fig:stage2-forest} can exclude zero at the $0.01\nats$ level: the seed-wise gap is consistent in direction across all 3 paired seeds even when the absolute loss varies by 0.005\nats{} between seeds.
+
+We pair at each arm's \emph{own} best LR rather than at a common LR, following \citet{wen2025fantastic}'s argument that \optMuon-family and \optAdamW{} sweet spots differ by $\approx 10\times$ and that comparing at a common LR penalises the optimizer whose grid sweet-spot it misses.

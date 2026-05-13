@@ -1,0 +1,16 @@
+\section{Limitations and Stage 3 outlook}\label{sec:limits}
+
+\paragraph{Seed count.}
+Stage~2 uses $n{=}3$ seeds per (rung, optimizer, LR) cell. The paired-bootstrap CIs at best LR happen to be tight (the within-arm seed std is $0.003$--$0.005$\nats{} on most rungs, and pair-wise differences are correlated across seeds when the architectural axis dominates), so the qualitative direction is well-resolved. Quantitative ``how much'' claims are however sensitive to the $n{=}3$ floor; the 5-seed Stage~1 result on A0 still has the tightest CI of the seven rungs.
+
+\paragraph{Divergence rate.}
+33\% of Stage~2 cells diverged --- almost entirely at the two highest LRs in each grid (Fig.~\ref{fig:stage2-divergence}). The telescoping protocol could have stopped the LR scan one step earlier and reclaimed those GPU-hours; whether to do that for Stage~3 is a budget decision, not a methodology question.
+
+\paragraph{No 350M validation rung.}
+The dense ladder closes at 60M Common-Size. The \citet{bergsma2025hp} caveat that ``the 1.4$\times$ Muon-over-AdamW gap vanishes rapidly with scale under incorrect scaling'' suggests that the dense $\optCoupled - \optMuon$ gap could shrink further at $\geq$350M with $\mu$P-tuned \optAdamW. The 350M rung is deferred per the design document and is not part of this report's scope.
+
+\paragraph{Why E doesn't regress like C/D --- open.}
+The Karpathy vanilla rung E retains learned positional embeddings (so the multi-head Q--K branch is disabled, same as C/D) but does not show the +0.05\nats{} regression. The leading hypothesis is that the bundled ``Karpathy nits'' (biased linears, GELU 2-mat with $4\cdot$hidden intermediate) incidentally lower the per-step gradient noise floor enough to wash out the flat-2D fallback's small additional damage. We do not have a probe-level proof of this.
+
+\paragraph{Stage 3 dispatch (out of scope).}
+The sparse MoE bridging rungs I, I', J, K, L, M, N have been dispatched per the in-repo \code{DISPATCH.md} manifest on Rig A (8$\times$H100) and Rig B (4$\times$H200) with a 2$\times$H200 AdamW-anchor on the side. The headline production target is the cross-optimizer triple at rung I (and the gate-omission control at I'), expected within $\approx 3.3$\,d of the Rig B launch. Those results will sit alongside this report's dense baseline in Stage~3's write-up; the prediction recorded in \S c of the design document is that the RoPE-coupled gain seen here on A0/B/G/H will narrow at the MoE class because of (i) per-expert SNR degradation under top-2 routing (the per-expert effective batch is $\approx 25\%$ of global), (ii) the gate-omission approximation in coupled SwiGLU becoming worse under skewed routing, and (iii) inter-expert competition that the within-expert pair coupling does not model.

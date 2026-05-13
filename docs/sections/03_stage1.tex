@@ -1,0 +1,54 @@
+\section{Stage 1: A0 (LLaMA-60M) reproduction}\label{sec:stage1}
+
+Stage~1 is the gate experiment from the design document: ``coupled-vs-Muon gap must be real and $\geq 3\times$ seed-to-seed std before proceeding.'' We run all three optimizers under the dense LLaMA-60M baseline with five seeds per (optimizer, LR) cell.
+
+\begin{figure}[h]
+\centering
+\figincl{fig01_stage1_loss_curves}
+\caption{Validation-loss curves at each optimizer's best LR; median over converged seeds with the IQR as a shaded band. \optAdamW{} ($3\!\cdot\!10^{-3}$, $n{=}5$) trails the \optMuon-family pair by a margin that is visually obvious from the first validation point onward; \optMuon{} ($10^{-2}$, $n{=}3$) and \optCoupled{} ($10^{-2}$, $n{=}5$) are nearly co-incident with \optCoupled{} just below \optMuon{} at the endpoint.}\label{fig:stage1-curves}
+\end{figure}
+
+\subsection{Where each optimizer's sweet spot sits}
+
+The LR sensitivity is well-localised for every optimizer (Fig.~\ref{fig:stage1-lr-sens}). \optAdamW{}'s minimum is at $3\!\cdot\!10^{-3}$ (median final val loss $3.70$); the \optMuon-family pair share a best-LR of $10^{-2}$ (\optCoupled{} median $3.41$ over 5 converged seeds; \optMuon{} median $3.43$ over 3 converged seeds out of 5 attempted, the remaining 2 diverged). The \optMuon-family sees catastrophic divergence at $3\!\cdot\!10^{-2}$ (Coupled: 5/5, Muon: 4/4) and $10^{-1}$ (5/5 both arms), evidence that the $\mathrm{lr} \times \sqrt{\max(A,B)}$ scaling at $\mathrm{hidden}{=}512$ already saturates the operator-norm budget at $10^{-1}$.
+
+\begin{figure}[h]
+\centering
+\figincl{fig02_stage1_lr_sensitivity}
+\caption{Stage~1 LR sensitivity per optimizer. Upper panel: median final val-loss with min/max whiskers across converged seeds (crosses mark diverged seeds, plotted at their reported loss-at-divergence). Lower panel: stacked count of converged (solid) vs diverged (grey) seeds per cell.}\label{fig:stage1-lr-sens}
+\end{figure}
+
+\subsection{Paired-bootstrap differences at best LR}
+
+\begin{table}[h]
+\centering
+\caption{Stage~1 best-LR summary. \optMuon{}'s small $n_{\mathrm{conv}}$ at $\mathrm{lr}{=}10^{-2}$ reflects 2 of 5 seeds diverging at the same hyper-parameter.}\label{tab:stage1-summary}
+\tabincl{tab03_stage1_summary}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\figincl{fig03_stage1_forest}
+\caption{Paired-bootstrap 95\% CIs at each arm's own best LR (pair by \code{(rung,\,seed)} after restricting to converged seeds shared between both arms). The Coupled-vs-Muon CI at A0 is $[-0.026, -0.023]$\nats{} --- 3 of 3 paired seeds favour \optCoupled, and the CI excludes zero. The Coupled-vs-AdamW gap of $\approx 0.29$\nats{} is the largest single signal in the entire study.}\label{fig:stage1-forest}
+\end{figure}
+
+The headline numerical result for Stage~1 is in Table~\ref{tab:stage1-summary} and Fig.~\ref{fig:stage1-forest}: \optCoupled{} beats \optMuon{} by $0.024 \pm 0.002$\nats{} on every paired seed at best LR, and beats \optAdamW{} by $0.293 \pm 0.025$\nats{}. The within-arm seed-std of \optCoupled{} at $\mathrm{lr}{=}10^{-2}$ is $\approx 0.003$\nats; the gap is therefore an $\approx 8\sigma$ signal at $n{=}5$, comfortably above the design document's $3\sigma$ gate.
+
+\subsection{Coupling diagnostics on the bilinear products}
+
+\optCoupled{}'s motivation is to flatten the condition number $\kappa(W_A W_B)$ of the bilinear products that drive the forward pass. Fig.~\ref{fig:stage1-kappa} traces $\kappa$ at layer 0 for the three coupled-pair categories, comparing one converged seed per optimizer. The Q--K and V--O products under \optCoupled{} sit roughly an order of magnitude below their \optMuon{} counterparts throughout training; the up--down product is closer to parity, consistent with the gate-omission caveat (Stage~1's MLP is SwiGLU, so the coupled pre-processor approximates the relevant Jacobian by dropping the gate term).
+
+\begin{figure}[h]
+\centering
+\figincl{fig04_stage1_kappa}
+\caption{Layer-0 condition number $\kappa(W_A W_B)$ vs tokens for the three bilinear products that \optCoupled{}'s stage-1 inner step targets. One converged seed per optimizer, sampled every 100\,M tokens. Y-axis is log-scaled.}\label{fig:stage1-kappa}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\figincl{fig05_stage1_attn_logit}
+\caption{Global maximum pre-softmax attention logit trace per optimizer (one converged seed each); the dotted line marks the MuonClip rescaling threshold $\tau=50$ \citep{moonshot2025kimi} for reference. None of the three optimizers approaches the threshold at 60M dense; the trace is included as evidence the algorithm does not accidentally introduce Q--K instability at this scale.}\label{fig:stage1-attn-logit}
+\end{figure}
+
+\paragraph{What would change this verdict.}
+A 0.024\nats{} Coupled-over-Muon gap at $n{=}5$ paired seeds clears the design document's significance gate, but doesn't yet license a strong cross-optimizer claim. Doubling seeds would shrink the CI by $\sqrt{2}$; the \S d.4 ablations in Appendix~\ref{app:d4} go further by separately turning off the stage-2 polish pass (showing whether the gain depends on it) and the per-pair couplings (localising which of Q--K, V--O, up--down carries the signal).

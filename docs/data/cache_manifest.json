@@ -1,0 +1,38 @@
+{
+  "entries": [
+    {
+      "project": "coupled-muon-A0-repro",
+      "n_runs": 73,
+      "n_diverged": 21,
+      "rungs": [
+        "A0"
+      ],
+      "fetched_at": "2026-05-13T11:11:49+00:00"
+    },
+    {
+      "project": "coupled-muon-ablation",
+      "n_runs": 104,
+      "fetched_at": "2026-05-13T11:11:52+00:00"
+    },
+    {
+      "project": "coupled-muon-ladder",
+      "n_runs": 270,
+      "n_diverged": 88,
+      "rungs": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "G",
+        "H"
+      ],
+      "fetched_at": "2026-05-13T11:13:37+00:00"
+    },
+    {
+      "project": "coupled-muon-ablation",
+      "n_runs": 104,
+      "fetched_at": "2026-05-13T11:16:07+00:00"
+    }
+  ],
+  "latest_fetched_at": "2026-05-13T11:16:07+00:00"
+}

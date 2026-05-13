@@ -1,0 +1,16 @@
+\section{Introduction}\label{sec:intro}
+
+\paragraph{Algorithm in one paragraph (no Muon recap).}
+\optCoupled{} extends \optMuon{} \citep{bernstein2024oonn} with a two-stage update on \emph{paired} weight matrices. For an attention head this is $(W_Q, W_K)$ and $(W_V, W_O^{h})$; for a 2-matrix MLP it is $(W_{\text{up}}, W_{\text{down}})$. Given gradient $G_A$ and partner $B$, stage~1 runs the Newton--Schulz quintic on the \emph{product iterate} $X B$,
+\begin{equation}\label{eq:two_stage}
+X \leftarrow \frac{G_A}{\lVert G_A B \rVert_F},\qquad
+W \leftarrow X B,\quad
+X \leftarrow a\,X + (b\,W W^{\top} + c\,(W W^{\top})^2)\,X
+\end{equation}
+so that $X B \rightarrow \mathrm{polar}(G_A B)$, then stage~2 applies plain $\mathrm{NS}(\cdot)$ to $X$ to re-impose $\lVert U_A \rVert_{\text{spec}} \approx 1$ for compatibility with \optMuon{}'s $\mathrm{lr} \times \sqrt{\max(A,B)}$ scaling. The two-stage construction is recorded as \code{U\_A = NS($C_A$(G\_A; B))} in \code{src/coupled\_muon\_nanogpt/optim/coupled\_muon.py}. To the best of our literature survey \citep{bernstein2024oonn,bernstein2024modular,liu2025moonlight,lau2025polargrad}, no published optimizer applies the iterate $C(G_A;B)$ using the current value of the partner $B$.
+
+\paragraph{Why this might or might not work, and where to look.}
+The forward pass uses bilinear products: pre-softmax logits are $(xW_Q)(xW_K)^{\top}$; the per-head value path is $\cdots W_V W_O$; the 2-mat MLP composition is $W_{\text{up}} W_{\text{down}}$. \optCoupled{} therefore preconditions in the same geometry the loss is computed in --- a sharper inductive bias than \optMuon{}'s per-matrix preconditioner. The bias is expected to weaken when (\emph{i}) QK-Norm rescales the Q--K product after the bilinear multiply (rungs G, H), (\emph{ii}) the MLP changes from gate-bearing SwiGLU to gate-free GELU/ReLU\textsuperscript{2} (B, H), or (\emph{iii}) the positional embedding switches from RoPE to learned --- in which case the implementation's per-head Q--K branch silently falls back to a flat-2D coupling because no 2-D RoPE rotation pair exists (C, D, E). The dense bridging ladder isolates each of these axes one rung at a time \citep[\S d.2]{karpathy2023nanogpt}\footnote{The \S~references throughout point at the in-repo \code{experiment.md} design document, not at any external paper section.}.
+
+\paragraph{Scope.}
+This report covers Stage~1 (A0 LLaMA-60M reproduction, wandb project \code{coupled-muon-A0-repro}) and Stage~2 (dense ladder B/C/D/E/G/H at 60M Common-Size, wandb project \code{coupled-muon-ladder}). Stage~3 (MoE rungs I, I', J, K, L, M, N) is dispatched on rigs A and B; the data are not yet on hand and are out of scope. The \S d.4 ablation suite (\code{coupled\_steps}, \code{final\_polish}, per-pair coupling) is summarised in Appendix~\ref{app:d4}.

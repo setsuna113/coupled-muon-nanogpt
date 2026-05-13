@@ -1,0 +1,33 @@
+\section{Reproducibility}\label{app:repro}
+
+Every figure and every table in this report is regenerated from the parquet snapshots committed under \code{docs/data/}. The snapshots themselves are produced from the four wandb projects in Table~\ref{tab:repro-manifest} by \code{docs/figures/fetch\_all.py}.
+
+\begin{table}[h]
+\centering
+\caption{Reproducibility manifest. SHA is the first 12 hex chars of the SHA-256 of each parquet's bytes. The latest fetch timestamp is taken from \code{docs/data/cache\_manifest.json}.}\label{tab:repro-manifest}
+\tabincl{tab06_repro_manifest}
+\end{table}
+
+\paragraph{To rebuild this report end-to-end:}
+
+\begin{verbatim}
+git clone <repo>
+cd coupled-muon-nanogpt
+uv sync --extra docs
+python docs/figures/fetch_all.py --refresh   # only when wandb sync changed
+python docs/figures/make_all.py              # regenerates every fig+tab
+latexmk -pdf -outdir=docs/build docs/report.tex
+\end{verbatim}
+
+\paragraph{Sync state at the time of this snapshot.}
+The data described above is a snapshot. Stage~1 has 73 of 75 expected cells synced (the two missing are \optMuon{} at $(\mathrm{lr},\,\mathrm{seed})\in\{(10^{-3}, 3),\,(3\!\cdot\!10^{-2}, 2)\}$, the latter of which would have diverged regardless of the missing seed). Stage~2 is fully synced at 270/270 cells. The \S d.4 ablation project has 104 of an expected 105 cells. None of the missing cells changes the qualitative reading of Fig.~\ref{fig:xstage-forest}; when the remaining cells sync, refresh the parquet via \code{fetch\_all.py --refresh} and re-run \code{make\_all.py}.
+
+\paragraph{Data lineage in the codebase.}
+The per-cell numeric source of truth is \code{<results-dir>/<run\_id>/metrics.jsonl}; the wandb cloud copy is a synced mirror. Provenance for which sweep produced which cell:
+\begin{itemize}
+\item Stage 1: \code{configs/sweeps/A0\_stage1\_muon.yaml} (50 cells) + \code{configs/sweeps/A0\_stage1\_adamw.yaml} (25 cells).
+\item Stage 2: \code{configs/sweeps/lr\_grid\_dense\_muon.yaml} (180 cells) + \code{configs/sweeps/lr\_grid\_dense\_adamw.yaml} (90 cells).
+\item \S d.4 ablations: \code{configs/sweeps/\{coupled\_steps\_ablation, final\_polish\_ablation, pair\_ablation, coupled\_x\_polish, muon\_ns\_budget\}.yaml}.
+\end{itemize}
+
+\noindent See the in-repo \code{DISPATCH.md} for which physical rig produced each batch and where the raw results live on disk.

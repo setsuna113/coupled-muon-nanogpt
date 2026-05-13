@@ -1,0 +1,31 @@
+\section{Cross-stage synthesis}\label{sec:synth}
+
+\begin{figure}[h]
+\centering
+\figincl[\linewidth]{fig12_xstage_forest}
+\caption{Cross-stage paired-bootstrap 95\% CIs at each arm's best LR, stacking A0 (Stage 1, top) on top of the Stage~2 ladder. The Coupled $-$ AdamW panel (right) is a uniform, large negative effect on every rung; the Coupled $-$ Muon panel (left) is the localisation signal: negative on every rung where the multi-head Q--K branch is active (A0, B, G, H; all under full RoPE), positive on C and D (learned-pos), and tied within CI on E (Karpathy vanilla). $n$ is the number of paired seeds (the minimum of converged seeds in either arm, after restricting to the arm's own best LR).}\label{fig:xstage-forest}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Cross-stage paired-bootstrap differences. ``\textbf{*}'' flags CIs bracketing zero. Negative = \optCoupled{} wins.}\label{tab:xstage-diffs}
+\tabincl{tab05_xstage_diffs}
+\end{table}
+
+Fig.~\ref{fig:xstage-forest} and Table~\ref{tab:xstage-diffs} are the headline of this report. The Coupled-vs-AdamW result is the cleanest finding: \optCoupled{} (and equivalently \optMuon{}) beats \optAdamW{} by $0.12$--$0.29$\nats{} of final val loss on every rung, with every CI excluding zero by margins that are an order of magnitude wider than the within-arm seed std. This is the well-anchored \optMuon-family-vs-\optAdamW{} dense reference at 60M; it sits comfortably inside the $1.10$--$1.50\times$ token-budget speedup literature spread \citep{shah2025essential,wen2025fantastic,bergsma2025hp}.
+
+The Coupled-vs-\optMuon{} result is structurally more interesting:
+
+\begin{itemize}
+\item \textbf{Coupled wins on RoPE rungs.} On A0 ($-0.024$\nats), B ($-0.008$\nats), G ($-0.011$\nats) and H ($-0.014$\nats), \optCoupled{} consistently beats \optMuon{} at each arm's best LR; the CIs all exclude zero. These are the rungs that retain full RoPE (\code{rope\_partial\_frac=1.0}, no learned positional embedding), and therefore the rungs on which the per-head Q--K coupled branch is active.
+
+\item \textbf{Coupled regresses on learned-positional rungs.} On C ($+0.066$\nats) and D ($+0.055$\nats) the sign flips; CIs exclude zero with \optMuon{} winning. These are precisely the rungs on which the multi-head Q--K branch silently falls back to flat-2D coupling because no 2-D RoPE rotation block exists.
+
+\item \textbf{Tie on Karpathy vanilla E} ($-0.002$\nats, CI brackets zero). Why E does not show the C/D regression is open. The Karpathy bundle ``D plus biases plus tighter intermediate'' may incidentally reduce the per-pair gradient noise enough that the flat-2D fallback's regression vanishes.
+\end{itemize}
+
+\paragraph{Headline statement.}
+The dense-ladder data are consistent with the architectural argument behind \optCoupled{}: orthogonalising the bilinear products $W_Q W_K^{\top}$, $W_V W_O$, $W_{\text{up}} W_{\text{down}}$ produces a small but consistent loss reduction over per-matrix \optMuon{} \emph{when the Q--K coupling can use RoPE's 2-D rotation block structure}. Removing RoPE silently degrades the Q--K branch, and the resulting algorithm regresses against vanilla \optMuon{} on rungs C/D. The headline finding is therefore not ``\optCoupled{} matches \optMuon{}'' (the conservative prior reading the design document allowed for at $n{=}3$); it is a sharper conditional --- \optCoupled{} beats \optMuon{} on RoPE-equipped architectures by $0.01$--$0.02$\nats{} at 60M-CS, and the gain is bounded by the implementation's RoPE-coupled multi-head branch.
+
+\paragraph{Calibration.}
+The Coupled-vs-AdamW gap of $0.12$--$0.29$\nats{} translates, via the standard log-linear loss-vs-tokens calibration at this scale, to an effective $\sim$1.3--1.5$\times$ token-budget speedup for the Muon-family pair over \optAdamW{}. The Coupled-vs-Muon gap of $0.01$--$0.024$\nats{} corresponds to roughly $\sim$1.02--1.04$\times$ additional token-budget --- a small but real improvement at this scale, and the right order of magnitude to ask whether it survives Stage~3's sparse MoE rungs.

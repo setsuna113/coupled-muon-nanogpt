@@ -1,0 +1,69 @@
+\section{Stage 2: dense bridging ladder B--H}\label{sec:stage2}
+
+Stage~2 walks the 60M-CS dense backbone through six architectural-knob changes, isolating one axis at a time from A0 (Fig.~\ref{fig:ladder-schematic}). The top branch A0$\to$B$\to$C$\to$D$\to$E removes SwiGLU's gate, then RoPE, then RMSNorm, ending at the Karpathy-style vanilla GPT-2 reference rung. The bottom branch A0$\to$G$\to$H adds QK-Norm, then swaps SwiGLU for ReLU\textsuperscript{2} 2-mat, ending at a modded-NanoGPT-style architecture.
+
+\begin{figure}[h]
+\centering
+\figincl[\linewidth]{fig06_ladder_schematic}
+\caption{Dense ladder schematic. Edge labels name the \emph{single axis} changed from the previous rung. Node colour encodes MLP family.}\label{fig:ladder-schematic}
+\end{figure}
+
+\subsection{Loss curves and best-LR drift}
+
+\begin{figure}[h]
+\centering
+\figincl{fig07_stage2_loss_curves}
+\caption{Per-rung val-loss curves at each (rung, optimizer) best LR (median over 3 seeds, IQR band).}\label{fig:stage2-curves}
+\end{figure}
+
+The six per-rung loss curves (Fig.~\ref{fig:stage2-curves}) are visually similar in shape but stratified at the endpoint --- the \optMuon-family pair below \optAdamW{} on every rung. Two structural differences are worth flagging before the paired comparison:
+
+\begin{figure}[h]
+\centering
+\figincl{fig10_stage2_lr_drift}
+\caption{Best LR per (rung, optimizer). The grey band marks QK-Norm-on rungs (G, H). \optCoupled{}'s best LR moves from $3\!\cdot\!10^{-3}$ on B and from $10^{-3}$ on C/D/E up to $3\!\cdot\!10^{-2}$ on G/H once QK-Norm is enabled --- a one-decade shift driven by the post-norm geometry. \optMuon{} shows a smaller, similar drift (peaking at $10^{-2}$ on most rungs). \optAdamW{}'s sweet spot is roughly stable.}\label{fig:stage2-lr-drift}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\figincl{fig08_stage2_lr_rung_heatmap}
+\caption{Median final val loss as a function of (rung, LR), faceted by optimizer. Each opt has its own LR grid; ``div'' marks (rung, LR) cells with zero converged seeds.}\label{fig:stage2-heatmap}
+\end{figure}
+
+The LR-drift figure (Fig.~\ref{fig:stage2-lr-drift}) is the clearest structural finding of Stage~2 in isolation: QK-Norm allows \optCoupled{} to run at $\mathrm{lr}=3\!\cdot\!10^{-2}$ stably, where without QK-Norm it requires $10^{-3}$--$3\!\cdot\!10^{-3}$. The full LR$\times$rung heatmap (Fig.~\ref{fig:stage2-heatmap}) confirms the shift is robust across LRs, not a single-cell artefact.
+
+\subsection{The headline paired-bootstrap result}
+
+\begin{figure}[h]
+\centering
+\figincl{fig09_stage2_forest}
+\caption{Stage~2 paired-bootstrap 95\% CIs at each arm's own best LR. Left panel: \optCoupled{} $-$ \optMuon. Right panel: \optCoupled{} $-$ \optAdamW. ``$*$'' marks CIs that bracket zero. Negative = \optCoupled{} wins; positive = the other arm wins.}\label{fig:stage2-forest}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Stage~2 per-rung best-LR summary. The \optMuon{} $n_{\mathrm{conv}}{=}2$ rows on C, D reflect the \optMuon-at-$\mathrm{lr}{=}10^{-2}$ cell having one of its three seeds diverge on those non-QK-Norm 2-mat rungs.}\label{tab:stage2-summary}
+\tabincl{tab04_stage2_summary}
+\end{table}
+
+Fig.~\ref{fig:stage2-forest} is the central result of Stage~2. \optCoupled{} consistently \emph{outperforms} \optMuon{} on three of the six ladder rungs (B by $-0.008$\nats; G by $-0.011$\nats; H by $-0.014$\nats; CIs exclude zero on every seed). It \emph{regresses} on C ($+0.066$\nats) and D ($+0.055$\nats) --- the two rungs that swap RoPE for learned positional embeddings --- and ties within CI on E (the Karpathy vanilla reference). Against \optAdamW, \optCoupled{} wins on every rung by $0.12$--$0.15$\nats, with no rung's CI within $5\sigma$ of zero.
+
+\paragraph{Interpretation: the RoPE-coupled gain.}
+The two regressions (C, D) align with one specific implementation observation recorded in the design document: the per-head Q--K coupled branch (the ``\code{use\_multi\_head}'' code path that reshapes \code{(head\_dim/2, 2)} pairs from the RoPE rotation block-diagonal) silently disables whenever \code{pos\_emb.type=learned} or \code{rope\_partial\_frac<1}, falling back to a flat-2D Q--K coupling \citep{liu2025moonlight}. On C and D this fall-back is active, \optCoupled{}'s best LR drops 10$\times$ below \optMuon{}'s (Fig.~\ref{fig:stage2-lr-drift}), and the comparison at each arm's own best LR shows \optMuon{} winning. The signal is therefore not a generic failure of coupling --- it is specifically a failure mode of the Q--K branch under non-RoPE attention.
+
+Rung E (Karpathy vanilla) is also learned-positional, but here both arms collapse to nearly identical best LR ($10^{-3}$) and nearly identical endpoint loss. Why E avoids the C/D regression is open --- the only architectural difference between D and E is the ``Karpathy nits'' bundle (bias-on linear layers, GELU 2-mat with $4\cdot$hidden intermediate, etc.); none of these touches the Q--K coupling path directly. We leave a confidence-bracketed claim here to the discussion in \S\ref{sec:limits}.
+
+The two QK-Norm rungs (G, H) preserve full RoPE but rescale the Q--K product after the bilinear multiply. The coupled gain survives at $-0.011$ and $-0.014$\nats{} respectively, and \optCoupled{}'s best LR happily moves to $3\!\cdot\!10^{-2}$ --- consistent with the design-document hypothesis (\S b.2.\,2) that QK-Norm and Q--K coupling partially overlap in function but do not fully redundantly cover each other.
+
+\paragraph{Sanity check: this is not a tuning artefact.}
+On the three rungs where \optCoupled{} wins, the gap is larger than the within-arm seed std at the same LR ($\approx 0.003$--$0.005$\nats{} per seed) by a factor of 2--5. On the two rungs where \optCoupled{} loses (C, D), the inverse is also true: \optMuon{}'s 0.055--0.066\nats{} margin is large relative to its 3-seed std at $\mathrm{lr}{=}10^{-2}$. We do not believe either signal is within seed noise; both directions are robust.
+
+\subsection{Divergence accounting}
+
+\begin{figure}[h]
+\centering
+\figincl{fig11_stage2_divergence}
+\caption{Stage~2 divergence rate as a (rung, LR) heatmap, faceted by optimizer. Of 270 total cells, 88 diverged (33\%); the loss is concentrated at $\mathrm{lr}=10^{-1}$ across all opts and at $\mathrm{lr}=3\!\cdot\!10^{-2}$ on non-QK-Norm \optCoupled{} cells. ``$\cdot$'' marks (rung, LR) cells not tried in this sweep.}\label{fig:stage2-divergence}
+\end{figure}
+
+The 33\% Stage~2 divergence rate (Fig.~\ref{fig:stage2-divergence}) is concentrated at the LR grid edges: $\mathrm{lr}{=}10^{-1}$ catastrophically diverges on every (rung, opt) combination, and $\mathrm{lr}{=}3\!\cdot\!10^{-2}$ diverges on \optCoupled{} for the non-QK-Norm 2-mat rungs C/D/E (matching the LR-drift evidence that \optCoupled{} needs $10^{-3}$--$3\!\cdot\!10^{-3}$ to remain stable there). \optAdamW{}'s divergences are concentrated at its own grid-top $3\!\cdot\!10^{-3}$ on a few seeds, otherwise its grid is fully populated. No converged-cell ``best LR'' is at a grid edge, so the telescoping sweep does not need to be re-extended for Stage~2.

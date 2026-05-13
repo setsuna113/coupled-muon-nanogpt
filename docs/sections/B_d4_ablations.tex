@@ -1,0 +1,43 @@
+\section{\S d.4 ablations (preliminary)}\label{app:d4}
+
+The \S d.4 ablation suite isolates which mechanical knob of \optCoupled{} carries the dense-LLaMA-60M gain. All cells run on A0 (SwiGLU + RoPE + RMSNorm), $1.2$\,B tokens, single-seed wide / multi-seed narrow per ablation. At report time 104 of the 105 planned cells have synced to wandb project \code{coupled-muon-ablation}; the figures below should be regenerated once the final cell lands (see Appendix~\ref{app:repro} for the refresh command).
+
+\subsection{Effect of inner NS depth (\code{coupled\_steps})}
+
+\begin{figure}[h]
+\centering
+\figincl{figB1_coupled_steps}
+\caption{Final val loss at A0 as a function of $\code{coupled\_steps}\in\{0,1,2,4,8\}$ with full Q--K + V--O + up--down coupling and stage-2 polish on. \code{coupled\_steps=0} reduces to vanilla \optMuon. Reference horizontal band: \optMuon{} at $\mathrm{lr}{=}3\!\cdot\!10^{-3}$ on the same project, median $\pm$ 95\% CI.}\label{fig:d4-coupled-steps}
+\end{figure}
+
+\subsection{Stage-2 polish on/off}
+
+\begin{figure}[h]
+\centering
+\figincl{figB2_final_polish}
+\caption{Effect of the trailing plain-NS pass (\code{final\_polish}). Left: median final val loss with 95\% CI for \code{final\_polish=True} vs \code{False}. Right: if available, the post-stage-1 $\sigma_{\max}(X)$ probe trace (the diagnostic that decides whether stage~2 is doing real work or is approximately a no-op).}\label{fig:d4-final-polish}
+\end{figure}
+
+\subsection{Per-pair ablation}
+
+\begin{figure}[h]
+\centering
+\figincl{figB3_per_pair}
+\caption{Which of the three coupling pairs carries the A0 gain: turn off Q--K, V--O, or up--down in isolation. Bars are median final val loss with 95\% CI over converged seeds; reference dashed line is plain \optMuon{} at the same LR.}\label{fig:d4-per-pair}
+\end{figure}
+
+\subsection{Two-way: \code{coupled\_steps} $\times$ \code{final\_polish}}
+
+\begin{figure}[h]
+\centering
+\figincl{figB4_steps_x_polish}
+\caption{$2\times \lvert\code{coupled\_steps}\rvert$ heatmap of median final val loss. ``$-$'' cells are not in the sweep.}\label{fig:d4-steps-x-polish}
+\end{figure}
+
+\subsection{Muon NS-budget control}
+
+\begin{figure}[h]
+\centering
+\figincl{figB5_ns_budget}
+\caption{Does extra NS budget alone (giving \optMuon{} a larger \code{ns\_steps}) match \optCoupled{}'s gain? If yes, the coupled gain is partly a ``more NS depth'' artefact; if no, the partner-aware iterate is the load-bearing piece.}\label{fig:d4-ns-budget}
+\end{figure}

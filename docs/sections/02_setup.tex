@@ -1,0 +1,26 @@
+\section{Experimental setup}\label{sec:setup}
+
+\paragraph{Model.} Every dense rung shares the 60M Common-Size shape: \code{hidden=512}, \code{n\_layers=8}, \code{n\_heads=8}, \code{head\_dim=64}, tied embeddings. Per-rung knob deltas are summarised in Table~\ref{tab:ladder-defs}; the schematic in Fig.~\ref{fig:ladder-schematic} renders the same information as a graph. Total parameter counts are 51.5M (SwiGLU rungs A0/G) and 50.9M (2-mat rungs B/C/D/E/H).
+
+\begin{table}[h]
+\centering
+\caption{Dense ladder rung definitions. The ``what changes'' column flags the single axis varied from the previous rung along each branch (top branch from A0: B$\to$C$\to$D$\to$E; bottom branch: A0$\to$G$\to$H).}\label{tab:ladder-defs}
+\tabincl{tab01_ladder_defs}
+\end{table}
+
+\paragraph{Data and budget.} FineWeb-Edu, \code{seq\_len=2048}, global batch $\approx 0.5$\,M tokens (per-GPU $B=16$, grad-accum $8$, 2 GPUs). Stage~1 runs 1.2\,B tokens per cell; Stage~2 runs 2.5\,B tokens per cell (Table~\ref{tab:compute-budget}).
+
+\begin{table}[h]
+\centering
+\caption{Compute budget per stage.}\label{tab:compute-budget}
+\tabincl{tab02_compute_budget}
+\end{table}
+
+\paragraph{Optimizer sweep.}
+We sweep five LRs per optimizer following the Essential AI telescoping protocol \citep{shah2025essential}: \optMuon{} family $\{10^{-3}, 3\!\cdot\!10^{-3}, 10^{-2}, 3\!\cdot\!10^{-2}, 10^{-1}\}$; \optAdamW{} $\{3\!\cdot\!10^{-5}, 10^{-4}, 3\!\cdot\!10^{-4}, 10^{-3}, 3\!\cdot\!10^{-3}\}$. Stage~1 uses 5 seeds per cell, Stage~2 uses 3 seeds per cell. Weight decay is $0.1 / \mathrm{width}$ per \citet{bergsma2025hp}; $\beta_1 = \beta_2 = 0.95$ for \optAdamW; $\beta = 0.95$, \code{ns\_steps}=5, \code{coupled\_steps}=4 for \optCoupled.
+
+\paragraph{Statistics protocol.}
+Final validation loss is the canonical outcome per cell. We adopt the convention that the optimizer is tuned to its \emph{own} best LR per rung before comparison, on the rationale of \citet{wen2025fantastic} that \optMuon-family and \optAdamW{} sweet spots differ by $\sim$10$\times$ and pairing at a common LR understates the gap. Concretely, for every (rung, optimizer) pair we find $\mathrm{lr}^* = \arg\min_{\mathrm{lr}}\,\mathrm{median}_{\text{seeds}}(\text{final val loss})$ over converged seeds only, then pair the converged seeds across optimizers by \code{(rung, seed)} at each arm's $\mathrm{lr}^*$. Reported confidence intervals are 95\% percentile bootstrap on the \emph{median} of paired seed-wise differences (10\,000 resamples), $\alpha = 0.05$; pseudocode in Appendix~\ref{app:stats}.
+
+\paragraph{Divergence policy.}
+A cell is recorded as \code{diverged=True} by the trainer when validation loss exceeds a fixed threshold or goes NaN. Diverged cells are excluded from CI computation but reported alongside the corresponding (rung, opt, LR) tuple in Fig.~\ref{fig:stage2-divergence}. We do not impute, censor, or re-seed diverged runs.
