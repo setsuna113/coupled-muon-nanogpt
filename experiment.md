@@ -427,3 +427,164 @@ The bilinear products `W_Q W_K^T`, `W_V W_O`, `W_up W_down` are what the forward
 ### X.5 Implication for stage 2
 
 Section a.2.1 frames stage 2 as enforcing `‖U_A‖_spec ≈ 1`. Under the rigorous derivation, we'd want Δ_A B = -η · polar(G_A P_B), which has spectral norm η — not Δ_A itself with spectral norm η. Stage 2 corrects the `‖Δ_A‖_spec` rather than the `‖Δ_A B‖_spec`. The two coincide when B has orthonormal rows; the gap between them is what `final_polish` controls in the ablation. If post-stage-1 σ_max(X) ≈ σ_min(B), stage 2 does meaningful work; if σ_max(X) ≈ 1 already, stage 2 ≈ no-op, and the Stiefel-limit approximation is tight. The post-stage-1 `‖X‖_spec` probe (d.4) measures this directly.
+
+---
+
+## (d.7) Phase 2 — factored-architecture rungs (new rungs and ablations)
+
+Phase 2 expands the bridging ladder along three axes: a **factored-architecture rung (MLA + low-rank Q)** to test CoupledMuon's distinctive claim where it actually bites; a **Newton–Schulz coefficient policy axis** + a **K-curve** to defend every CoupledMuon-vs-Muon delta against the "did a better NS policy close the gap?" attack; and a set of **methodology equalizers** (AdamW seeds × LR matched to Muon-family, pair-policy split at production, LR-prefactor formulas). Plus a **350M MLA scaling rung** to produce a 2-point scaling-trend claim, and an **imposed-FFN-factorization** rung to test whether the gain transfers beyond natively factored architectures.
+
+Scope follows `suggestion.md` Tier S + A + selected B (B1 LoRA-rank, B3 imposed-FFN). KDA / linear-attention (B2), GPT-2 baseline, FFN-nonlinearity sweep, and sliding-window attention are out of scope.
+
+### d.7.1 New ladder rungs
+
+```
+O_mla        H with attention → DeepSeek-V2/V3-style MLA:
+             - KV down-up factored pair (W_DKV, W_UK) — natively factored
+             - V up-projection (W_UV) shares W_DKV but is routed to plain Muon
+               (CoupledMuon_v2.step's `processed` set rules out two coupled
+                pairs sharing a B-partner; a 3-way (UK, UV, DKV) joint
+                coupling is deferred to Phase 2.5)
+             - Optional low-rank Q (W_DQ, W_UQ) when q_lora_rank > 0
+             [headline novel architecture for Phase 2; the single rung where
+              CoupledMuon couples *natively factored* weights — suggestion.md
+              §1.2 + §2.4]
+
+P_factff     A0 with each SwiGLU FFN replaced by an imposed
+             (d_in, r) × (r, d_out) 2-mat factorisation at r=128, no gate.
+             Couples (factff_down, factff_up) — the only learnable
+             composition.
+             [tests whether CoupledMuon's gain transfers from natively-
+              factored (MLA) to imposed-factored (GaLore-style) FFN;
+              suggestion.md §B3]
+
+Z_350m_dense Scaled-up A0: hidden=1024, n_layers=18 ⇒ ~350M dense. SwiGLU,
+             RMSNorm, RoPE, no QK-Norm. 7B tokens ≈ 20× Chinchilla.
+             [size-axis validation; existing experiment.md d.5 §329
+              commissioned recipe, now formally part of Phase 2]
+
+Z_350m_mla   Z_350m_dense + MLA (kv_lora_rank=128, q_lora_rank=128) + MoE
+             (8 experts top-2, every-other). ~480M total / ~110M active.
+             [stretch rung for the MLA scaling-trend claim;
+              suggestion.md §5 generous version, rescoped to 350M]
+```
+
+### d.7.2 Localisation rules added to d.2
+
+- If the coupled gap survives at H but dies at **O_mla** → factor-aware
+  coupling is *also* approximate on MLA (likely the K-channel partial-RoPE ×
+  DKV interaction; examine `pair_factor_ratio` of (W_UK, W_DKV)).
+- If the gap is **larger at O_mla than at I** → the factored-update reframing
+  (suggestion.md §1.2) is empirically confirmed; the paper's central claim
+  becomes "CoupledMuon is the natural optimizer for MLA's factored KV".
+- If the gap survives at both **O_mla and P_factff** → factor-aware coupling
+  transfers to *imposed* factorisation; CoupledMuon becomes a GaLore-class
+  tool.
+- If the gap survives at **O_mla but dies at P_factff** → CoupledMuon is
+  strictly an MLA/LoRA tool; the paper scope narrows accordingly.
+- If the gap at **Z_350m_mla < 0.5× the gap at O_mla** → scaling-trend claim
+  weakens; the post-Wen-2025 "speedup vanishes with scale" critique applies
+  and the headline must be reframed as small-scale.
+
+### d.7.3 d.3 protocol additions
+
+**Newton–Schulz coefficient policy.** Phase 1 fixed the Bernstein
+(3.4445, −4.7750, 2.0315) quintic. Phase 2 adds two alternatives via the
+`optimizer.ns_coefficients` knob:
+
+- `polar_express` — degree-5 per-step coefficients from Amsel, Persson, Musco
+  & Gower, "The Polar Express" (arXiv 2505.16932, ICLR 2026). Drives the
+  polar iterate to ≈ 1 ≈ 2× faster at the spectral floor (`suggestion.md`
+  §1.3).
+- `cesista` — per-step optimised coefficients from Cesista, YouJiacheng &
+  Jordan, "Squeezing 1–2% efficiency gains" (2025).
+
+Coefficient tables are static per (policy, K) — see
+`src/coupled_muon_nanogpt/optim/ns_coefficients.py`. **Phase-2 Polar-Express
+and Cesista values are approximate reproductions**; canonical values must be
+patched in from the published supplements before the headline paper run.
+
+A Gram-NS form flag (`optimizer.ns_gram_form`) is wired through but the
+actual Zhang–Amsel–Chen–Dao 2026 kernel is deferred to Phase 2.5 (the flag is
+currently a passthrough to the standard form). Sweep YAMLs may set the flag
+without surprises; numerics will match the standard NS form until the kernel
+lands.
+
+**LR-prefactor policy.** Phase 1 used `0.2·√max(d_out, d_in)`
+(Moonlight Lemma 1). Phase 2 adds `optimizer.lr_prefactor ∈ {moonlight,
+bernstein_ratio, cesista}` (default `moonlight` — Phase-1 bitwise identical):
+
+- `moonlight`: `0.2 · √max(d_out, d_in)`.
+- `bernstein_ratio`: `0.2 · √(d_out / d_in)` (Bernstein–Newhouse 2024 /
+  Cesista per-row normalisation argument).
+- `cesista`: `0.2 · √max(d_out, d_in) / (1 + log(K + 1))` — per-step
+  normalised.
+
+**Coupled-K curve.** Phase 1 fixed K=4. Phase 2 sweeps
+K ∈ {1, 2, 3, 5, 8, 12} at A0 (with the winning S1 NS policy) to bound the
+per-step cost story and test that the LLaMA-60M result is not K=4-specific.
+
+**Pair-factor-ratio probe.** A new logging-only probe `pair_factor_ratio`
+logs `||W_A||_F / ||W_B||_F` per coupled pair every
+`pair_factor_ratio_interval_tokens`. Tests the LoRA-RITE one-factor-
+dominates pathology (suggestion.md §2.7). Zero compute cost (two `.norm()`
+calls per pair).
+
+### d.7.4 d.4 ablation table additions
+
+| Ablation | What it tells you |
+|---|---|
+| NS coefficient policy ∈ {bernstein, polar_express, cesista} × K ∈ {3, 5, 8} (S1) | Defends every CoupledMuon-vs-Muon delta against "Polar-Express closes the gap". 36 cells at A0 covering both plain Muon and CoupledMuon. |
+| Gram-NS flag on plain Muon's stage 2 (S1 sub-axis) | Tests whether NS-on-G·Gᵀ improves vanilla Muon enough to close half the gap before MLA is even introduced. Currently a passthrough; the flag wires through for Phase 2.5 readiness. |
+| Coupled-K curve at A0 (S3) | 18 cells = 6 K values × 3 seeds. Localises the K-curve to detect whether K=2 is sufficient or K=12 is required. |
+| Pair-selection at production rung I (A1) | 15 cells × 3 pair policies (attn-only / FFN-only / all). Localises whether the gain is attention-side, FFN-side, or composite at production scale. |
+| LR-prefactor policy ∈ {moonlight, bernstein_ratio, cesista} (A2) | 16 cells = 3 prefactors × 3 LRs × ~2 seeds at A0. |
+| AdamW @ 5 LRs × 5 seeds at I and I' (A3) | +10 cells at I, +10 at I'. Closes the asymmetric-tuning attack against the Phase-1 5-vs-3 schedule. |
+| LoRA-rank ∈ {16, 32, 64, 128, 256} on (W_UK, W_DKV) at O_mla (B1) | 15 cells = 5 ranks × 3 seeds. Bounds the rank-knee of CoupledMuon's gain. |
+| Imposed FFN factorisation transfer (B3) | 12 cells = 2 factorisation states × 2 optimizers × 3 seeds. Tests whether the factor-aware advantage transfers from native (MLA) to imposed (FactFF) factor structure. |
+| MLA at 350M scaling (Z_350m_mla) | 30 cells × {Muon, CoupledMuon} × 3 LRs × 5 seeds. Conditional dispatch (gating rule in DISPATCH.md). |
+
+### d.7.5 d.5 compute-estimate rows
+
+| Config | Params | Tokens | Wall-clock on R_prod (4×H200) | Comment |
+|---|---|---|---|---|
+| O_mla (60M-CS MLA MoE) | ~70M total / ~30M active | 5B | ~3.0 h/seed | Same dense backbone as I; MLA adds DKV/UK/UV/DQ/UQ params. |
+| P_factff (A0 with imposed-factored FFN, r=128) | ~45M | 1.2B | ~1.0 h/seed on R_abl | A0 dense backbone; smaller because no gate. |
+| Z_350m_dense | 350M | 7B | ~9 h/seed | hidden=1024, n_layers=18. |
+| Z_350m_mla | ~480M total / ~110M active | 7B | ~12 h/seed | 350M + MLA + MoE 8 experts top-2. |
+
+### d.7.6 Phase-2 scope, dependencies, termination criteria
+
+**Scope** (suggestion.md §5 generous envelope; user-confirmed). Tier S
+(S1 NS-policy, S2 MLA single rung, S3 K-curve) + Tier A (A1 pair-selection
+at production, A2 LR-prefactor, A3 AdamW equalization) + Tier B subset (B1
+LoRA-rank sweep, B3 imposed-FFN). Plus the 350M MLA stretch. **Out of
+scope**: KDA / linear-attention (deferred to Phase 3), GPT-2 baseline, FFN
+nonlinearity sweep, sliding-window attention, momentum/Nesterov sweeps,
+multi-rung scale ladder (L/M sub-rungs).
+
+**Dependency graph**:
+
+- `S1 NS-policy winner` → propagates to S3, S2, A1, B1, and the 350M stretch
+  as the default `optimizer.ns_coefficients` value. In-flight Bernstein
+  cells from S2 remain valid as a "Bernstein baseline" half-grid; remaining
+  cells re-launch with the winner.
+- `O_mla S2 readout` → gates the 350M-stretch dispatch. Decision rule: at
+  T+5.6 d, read out the bootstrap CI on median val-loss gap at the best LR
+  per optimizer; commission stretch only if
+  `gap_p50 > 1.5 × pooled_seed_std`.
+- `A3` (AdamW equalization) is independent — runs in parallel with
+  everything else.
+
+**Termination criteria**. If O_mla shows no resolved CoupledMuon-vs-Muon gap
+at matched LR/seeds, Phase 2 reframes the paper toward "Muon NS-policy is
+the dominant axis; CoupledMuon is a modest factor-aware refinement when
+factors are present" (matches the suggestion.md §0 reframing). Stop the
+350M-stretch cells in that branch. S1 still produces a publishable
+NS-policy result regardless of MLA outcome; the pair-factor-ratio probe
+results stand as the LoRA-RITE empirical complement to the optimizer
+comparison. **MLA UV is routed to plain Muon** (not coupled) because
+`CoupledMuon_v2.step`'s `processed` set rules out two coupled pairs sharing
+a B-partner; this is an honest scoping note — the K-side coupling is the
+testable factored claim, and a 3-way (UK, UV, DKV) joint coupling kernel is
+the Phase 2.5 algorithmic improvement if Phase 2 lands a positive result.

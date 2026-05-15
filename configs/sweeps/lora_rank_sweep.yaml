@@ -1,0 +1,23 @@
+# Phase-2 Tier B1 — LoRA-rank (kv_lora_rank) sensitivity at O_mla.
+# At what rank does CoupledMuon stop being worth it (suggestion.md B1 / §229)?
+# Important for scale-extrapolation: a low knee means CoupledMuon scales
+# cheaply; a high knee means production-scale MLA configs (kv_lora_rank=128+)
+# are the only place to deploy it.
+#
+# 15 cells = 5 ranks × 3 seeds. CoupledMuon only. Fix q_lora_rank=64 so the
+# rank axis only varies the KV side. Lives on R_screen (8×H100), 4-way
+# parallel × ~4 h/cell, ~1.9 rig-days.
+#
+# ACTION ITEM (before dispatch): once S1 has named the winning policy,
+# patch `optimizer.ns_coefficients` to that value.
+base: configs/ladder/O_mla.yaml
+grid:
+  model.attn.kv_lora_rank: [16, 32, 64, 128, 256]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.lr: 1.0e-2
+  optimizer.ns_coefficients: bernstein
+  model.attn.q_lora_rank: 64
+  run.wandb_project: coupled-muon-lora-rank
+  run.wandb_group: "${name}/kv${model.attn.kv_lora_rank}"

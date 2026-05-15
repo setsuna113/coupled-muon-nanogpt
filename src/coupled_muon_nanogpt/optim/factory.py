@@ -38,7 +38,18 @@ _LAYER_RE = re.compile(r"\.(?:layers|h)\.(\d+)\.")
 # and only the last expert's weights entered the optimizer (#1 audit).
 _EXPERT_RE = re.compile(r"\.experts\.(\d+)\.")
 _SHARED_EXPERT_RE = re.compile(r"\.shared_expert\.")
-_PROJ_NAMES = ("q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj")
+_PROJ_NAMES = (
+    "q_proj", "k_proj", "v_proj", "o_proj",
+    "up_proj", "down_proj", "gate_proj",
+    # Phase-2 MLA projections (factored attention; suggestion.md S2 / §2.4).
+    # Pair convention: (W_UK, W_DKV) and (W_UV, W_DKV) for KV down-up;
+    # (W_UQ, W_DQ) for the optional low-rank Q. `mla_kr_proj` (the always-
+    # RoPE'd K side) has no factored partner — routed to plain Muon.
+    "mla_dkv_proj", "mla_uk_proj", "mla_uv_proj", "mla_kr_proj",
+    "mla_dq_proj", "mla_uq_proj",
+    # Phase-2 imposed-FFN-factorisation (Tier B3 / §245).
+    "factff_up_proj", "factff_down_proj",
+)
 
 
 @dataclass
@@ -46,6 +57,13 @@ class ParamGroups:
     coupled_qk: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
     coupled_vo: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
     coupled_updown: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
+    # Phase-2 factored-architecture pairs (MLA KV/Q + imposed-factored FFN).
+    # The MLA W_DKV param appears as B-partner in BOTH (UK,DKV) and (UV,DKV);
+    # CoupledMuon_v2 keys per-pair state by `id(param)`, so DKV accumulates
+    # the union of UK-side and UV-side updates each step.
+    coupled_mla_kv: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
+    coupled_mla_q: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
+    coupled_factff: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
     muon_2d: list[nn.Parameter] = field(default_factory=list)
     adamw_other: list[nn.Parameter] = field(default_factory=list)
     router_params: list[nn.Parameter] = field(default_factory=list)
@@ -86,6 +104,8 @@ def classify_parameters(
     couple_qk: bool = True,
     couple_vo: bool = True,
     couple_updown: bool = True,
+    couple_mla: bool = True,
+    couple_factff: bool = True,
     n_heads: int = 1,
     n_kv_heads: int | None = None,
     couple_router_to_muon: bool = True,
@@ -165,6 +185,49 @@ def classify_parameters(
             if "k_proj" in params:
                 groups.muon_2d.append(params["k_proj"])
 
+        # MLA KV pairs (Phase-2). DKV is the latent down-projection shared by
+        # the K-side (UK) and V-side (UV) up-projections. CoupledMuon_v2's
+        # per-step `processed` set skips any tuple whose A or B was already
+        # updated, so DKV cannot appear as B-partner in TWO coupled pairs in
+        # the same step — the second would silently no-op (and UV would never
+        # receive any update). Pick the K-side as the coupled partner of DKV
+        # (the (W_UK, W_DKV) pair is the structural analogue of LoRA's (B, A)
+        # for the K matrix), and route UV through plain Muon. Phase-2.5 will
+        # explore a 3-way (UK, UV, DKV) joint coupling but that requires an
+        # algorithmic change to the inner NS loop. `mla_kr_proj` (the always-
+        # RoPE'd K side) is a flat x→head_dim matrix with no factored partner;
+        # also routed to plain Muon.
+        if couple_mla and "mla_dkv_proj" in params and "mla_uk_proj" in params:
+            dkv = params["mla_dkv_proj"]
+            groups.coupled_mla_kv.append((params["mla_uk_proj"], dkv, n_kv))
+            if "mla_uv_proj" in params:
+                groups.muon_2d.append(params["mla_uv_proj"])
+        else:
+            for r in ("mla_dkv_proj", "mla_uk_proj", "mla_uv_proj"):
+                if r in params:
+                    groups.muon_2d.append(params[r])
+        if "mla_kr_proj" in params:
+            groups.muon_2d.append(params["mla_kr_proj"])
+
+        # MLA Q pair (only when q_lora_rank > 0; otherwise the regular q_proj
+        # branch above handles attention's query side).
+        if couple_mla and "mla_uq_proj" in params and "mla_dq_proj" in params:
+            groups.coupled_mla_q.append((params["mla_uq_proj"], params["mla_dq_proj"], n_heads))
+        else:
+            for r in ("mla_uq_proj", "mla_dq_proj"):
+                if r in params:
+                    groups.muon_2d.append(params[r])
+
+        # Imposed-FFN-factorisation pair (P_factff rung; Tier B3).
+        if couple_factff and "factff_up_proj" in params and "factff_down_proj" in params:
+            up = params["factff_up_proj"]
+            dn = params["factff_down_proj"]
+            groups.coupled_factff.append((dn, up, up.size(0)))
+        else:
+            for r in ("factff_up_proj", "factff_down_proj"):
+                if r in params:
+                    groups.muon_2d.append(params[r])
+
     # Anything else 2D (e.g. MoE expert matrices not under our naming) → plain Muon.
     groups.muon_2d.extend(other_2d)
     return groups
@@ -207,6 +270,8 @@ def build_optimizer(
             couple_qk=False,
             couple_vo=False,
             couple_updown=False,
+            couple_mla=False,
+            couple_factff=False,
             n_heads=n_heads,
             n_kv_heads=n_kv_heads,
             couple_router_to_muon=bool(opt.get("couple_router_to_muon", True)),
@@ -224,6 +289,9 @@ def build_optimizer(
             adamw_betas=tuple(opt.betas),
             adamw_eps=float(opt.eps),
             ns_dtype=_resolve_ns_dtype(opt.get("ns_dtype", "bf16")),
+            ns_coefficients=str(opt.get("ns_coefficients", "bernstein")),
+            ns_gram_form=bool(opt.get("ns_gram_form", False)),
+            lr_prefactor=str(opt.get("lr_prefactor", "moonlight")),
         )
 
     if opt.type == "coupled_muon_v2":
@@ -232,6 +300,8 @@ def build_optimizer(
             couple_qk=bool(opt.couple_qk),
             couple_vo=bool(opt.couple_vo),
             couple_updown=bool(opt.couple_updown),
+            couple_mla=bool(opt.get("couple_mla", True)),
+            couple_factff=bool(opt.get("couple_factff", True)),
             n_heads=n_heads,
             n_kv_heads=n_kv_heads,
             couple_router_to_muon=bool(opt.get("couple_router_to_muon", True)),
@@ -244,6 +314,16 @@ def build_optimizer(
             coupled_pairs.append((a, b, h, False))
         for a, b, h in groups.coupled_qk:
             coupled_pairs.append((a, b, h, True))
+        # Phase-2 factored-architecture pairs. MLA pairs use is_qk=False
+        # (the multi-head Q-K reshape path requires the 2-D RoPE rotation
+        # block structure, which MLA's split nope/rope head layout doesn't
+        # match; flat-2D coupling is the correct path). factff also flat-2D.
+        for a, b, h in groups.coupled_mla_kv:
+            coupled_pairs.append((a, b, h, False))
+        for a, b, h in groups.coupled_mla_q:
+            coupled_pairs.append((a, b, h, False))
+        for a, b, h in groups.coupled_factff:
+            coupled_pairs.append((a, b, h, False))
 
         # The multi-head Q-K branch in coupled_muon.py reshapes head_dim into
         # 2-D RoPE rotation pairs. That structure only exists with full RoPE.
@@ -291,6 +371,10 @@ def build_optimizer(
             use_multi_head=use_multi_head,
             n_heads=n_heads,
             ns_dtype=_resolve_ns_dtype(opt.get("ns_dtype", "bf16")),
+            # Phase-2 NS / LR-prefactor knobs.
+            ns_coefficients=str(opt.get("ns_coefficients", "bernstein")),
+            ns_gram_form=bool(opt.get("ns_gram_form", False)),
+            lr_prefactor=str(opt.get("lr_prefactor", "moonlight")),
         )
 
     raise ValueError(f"Unknown optimizer.type={opt.type!r}")

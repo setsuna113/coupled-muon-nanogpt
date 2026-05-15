@@ -1,0 +1,23 @@
+# Phase-2 Tier B3 — Imposed FFN factorisation transfer test.
+# Does CoupledMuon's advantage transfer from NATIVE factor structure
+# (MLA) to IMPOSED factor structure (FactorizedMLP)? If yes, CoupledMuon
+# becomes a GaLore-class tool. If no, it's strictly an MLA/LoRA tool
+# (suggestion.md B3 / §245).
+#
+# 12 cells = 2 factorization states × 2 optimizers × 3 seeds.
+#   - Factorized = P_factff (rank-128 imposed factff on dense A0)
+#   - Unfactored = A0 (standard SwiGLU; control)
+# CoupledMuon vs plain Muon at the same LR / NS policy. Lives on R_abl
+# (2×H200), ~1 h/cell, ~0.5 rig-days.
+#
+# Both bases listed; `expand.py` cross-products with the optimizer + seed grid.
+bases:
+  - configs/ladder/A0_llama60m.yaml
+  - configs/ladder/P_factff.yaml
+grid:
+  optimizer.type: [muon, coupled_muon_v2]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.lr: 3.0e-3
+  optimizer.ns_coefficients: bernstein
+  run.wandb_project: coupled-muon-imposed-factff

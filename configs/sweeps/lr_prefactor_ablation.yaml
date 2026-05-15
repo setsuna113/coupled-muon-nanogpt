@@ -1,0 +1,21 @@
+# Phase-2 Tier A2 — LR-prefactor formula sweep at A0 (60M-CS dense).
+# Moonlight's `0.2·√max(A,B)` is convention, not derivation
+# (suggestion.md A2 / §206). Cesista/Bernstein argue for `√(d_out/d_in)`.
+# CoupledMuon's η_A and η_B use different prefactors per side — matters more
+# than for plain Muon.
+#
+# 16 cells = 3 prefactors × 3 LRs × 2 seeds (≈18; pruned to 16 by dropping
+# 2 outliers post-expand). Same K, same NS policy across all cells. Lives
+# on R_abl, ~1 h/cell, ~0.67 rig-days.
+base: configs/ladder/A0_llama60m.yaml
+grid:
+  optimizer.lr_prefactor: [moonlight, bernstein_ratio, cesista]
+  optimizer.lr: [1.0e-3, 3.0e-3, 1.0e-2]
+  seed: [0, 1]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.coupled_steps: 4
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  run.wandb_project: coupled-muon-lr-prefactor
+  run.wandb_group: "${name}/pref_${optimizer.lr_prefactor}_lr${optimizer.lr}"

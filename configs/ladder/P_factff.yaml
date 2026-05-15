@@ -1,0 +1,49 @@
+# Ladder rung P_factff — A0 dense backbone with imposed FFN factorisation
+# at rank 128 (suggestion.md B3 / §245).
+# Tests whether CoupledMuon's factor-aware advantage transfers from native
+# (MLA) to imposed (GaLore-style) factor structure. Dense backbone identical
+# to A0 (hidden=512, n_layers=8, n_heads=8); each FFN replaced by
+# FactorizedMLP(hidden=512, rank=128) — ReLU² between the two mats, no gate.
+# CoupledMuon couples (factff_down, factff_up); update path uses the existing
+# 2-D coupled-NS kernel.
+name: ladder_P_factff
+
+model:
+  hidden: 512
+  n_layers: 8
+  attn:
+    n_heads: 8
+    qk_norm: false
+  mlp:
+    type: factff
+    factorize_rank: 128
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: true
+  couple_qk: true
+  couple_vo: true
+  couple_updown: false            # no SwiGLU pair here; factff covers FFN
+  couple_factff: true
+
+train:
+  total_tokens: 1_200_000_000
+  seq_len: 2048
+  local_batch_size: 16
+  grad_accum_steps: 8
+  warmup_steps: 200
+  log_every_steps: 25
+  eval_every_steps: 500
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 100_000_000
+    coupled_pair_interval_tokens: 100_000_000
+    attn_logit_interval_tokens: 10_000_000
+    pair_factor_ratio_interval_tokens: 50_000_000

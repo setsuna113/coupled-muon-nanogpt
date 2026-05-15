@@ -1,0 +1,14 @@
+# Phase-2 Tier A3 (2/2) — AdamW seed/LR equalization at I'.
+# Same shape as `adamw_equalization_I.yaml`; brings the I'-AdamW grid up to
+# 5 LRs × 5 seeds, matching Muon-family at I'.
+#
+# 10 cells = 5 LRs × 2 seeds (seeds 3, 4; Phase-1 covered 0/1/2 in pt1A_iprime).
+# Lives on R_screen (8×H100), 4-way parallel × ~4 h/cell, ~0.25 rig-days.
+bases:
+  - configs/ladder/I_prime_relu2_moe.yaml
+grid:
+  optimizer.type: [adamw]
+  optimizer.lr: [3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3]
+  seed: [3, 4]
+fixed:
+  run.wandb_project: coupled-muon-moe-anchor-adamw-Iprime

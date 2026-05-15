@@ -1,0 +1,23 @@
+# Phase-2 Tier S2 — Cross-optimizer triple at rung O_mla (60M-CS MLA MoE).
+# Headline production cells for Phase 2: the single architecture that
+# exercises CoupledMuon's distinctive factor-aware geometry (suggestion.md
+# §0 / S2 / §2.4).
+#
+# 45 cells = 3 optimizers × 3 LRs × 5 seeds. Symmetric grid; AdamW at lr=3e-2
+# is expected to NaN — that's informative (confirms LR sensitivity differs
+# between optimizers). The A3 sweep (`adamw_equalization_I*.yaml`) keeps the
+# AdamW LR grid spanning 3e-5..3e-3; for O_mla the symmetric grid is the
+# cleanest cross-optimizer reference.
+#
+# ACTION ITEM (before dispatch): once S1 has chosen the winning NS policy,
+# patch `optimizer.ns_coefficients` from `bernstein` to that value.
+#
+# Lives on R_prod (4×H200), ~3 h/cell, ~5.6 rig-days.
+base: configs/ladder/O_mla.yaml
+grid:
+  optimizer.type: [muon, coupled_muon_v2, adamw]
+  optimizer.lr: [3.0e-3, 1.0e-2, 3.0e-2]
+  seed: [0, 1, 2, 3, 4]
+fixed:
+  optimizer.ns_coefficients: bernstein
+  run.wandb_project: coupled-muon-mla

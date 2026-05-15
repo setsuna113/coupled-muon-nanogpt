@@ -1,0 +1,23 @@
+# Phase-2 Tier S3 — Coupled-K curve at A0, fixed to the winning NS policy
+# from S1 (suggestion.md S3). Bounds the K-curve story: is K=2 enough? Does
+# K=12 add anything? Necessary for scale-extrapolation claims.
+#
+# 18 cells = 6 K values × 3 seeds. CoupledMuon only.
+#
+# ACTION ITEM (before dispatch): once S1 (`ns_coeff_K_sweep.yaml`) has named
+# the winning policy via wandb readout, replace `optimizer.ns_coefficients`
+# below with that value. Default left as `bernstein` so the YAML can be
+# committed before S1 finishes — the post-S1 re-launch is a single
+# `--override optimizer.ns_coefficients=<winner>` away.
+base: configs/ladder/A0_llama60m.yaml
+grid:
+  optimizer.coupled_steps: [1, 2, 3, 5, 8, 12]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.lr: 3.0e-3
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  run.wandb_project: coupled-muon-k-curve
+  run.wandb_group: "${name}/K${optimizer.coupled_steps}"
+  train.probes.ns_internal_interval_tokens: 100_000_000

@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .attention import AttnConfig, CausalSelfAttention
+from .attention import AttnConfig, CausalSelfAttention, MultiLatentAttention
 from .components import make_norm
 from .mlp import make_mlp
 from .moe import MoEConfig, MoEFFN
@@ -43,6 +43,18 @@ class BlockConfig:
     max_seq_len: int = 4096
     moe_enabled: bool = False
     moe_cfg: dict[str, Any] = field(default_factory=dict)
+    # Phase-2 attention type + MLA dims (suggestion.md S2 / §2.4). `attn_type`
+    # defaults to "mha" → existing CausalSelfAttention path. When "mla", the
+    # MLA dims below must all be positive.
+    attn_type: str = "mha"
+    kv_lora_rank: int = 0
+    q_lora_rank: int = 0
+    qk_nope_head_dim: int = 0
+    qk_rope_head_dim: int = 0
+    v_head_dim: int = 0
+    # Phase-2 imposed-FFN-factorisation (rung P_factff / Tier B3). When
+    # mlp_type == "factff", `mlp_factorize_rank` is the bottleneck rank.
+    mlp_factorize_rank: int = 0
 
 
 @dataclass
@@ -65,19 +77,31 @@ class Block(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.norm1 = make_norm(cfg.hidden, cfg.norm_type, eps=cfg.norm_eps)
-        self.attn = CausalSelfAttention(
-            AttnConfig(
-                hidden_size=cfg.hidden,
-                n_heads=cfg.n_heads,
-                n_kv_heads=cfg.n_kv_heads,
-                head_dim=cfg.head_dim,
-                qk_norm=cfg.qk_norm,
-                pos_emb_type=cfg.pos_emb_type,
-                rope_base=cfg.rope_base,
-                rope_partial_frac=cfg.rope_partial_frac,
-                max_seq_len=cfg.max_seq_len,
-            )
+
+        attn_cfg = AttnConfig(
+            hidden_size=cfg.hidden,
+            n_heads=cfg.n_heads,
+            n_kv_heads=cfg.n_kv_heads,
+            head_dim=cfg.head_dim,
+            qk_norm=cfg.qk_norm,
+            pos_emb_type=cfg.pos_emb_type,
+            rope_base=cfg.rope_base,
+            rope_partial_frac=cfg.rope_partial_frac,
+            max_seq_len=cfg.max_seq_len,
+            attn_type=cfg.attn_type,
+            kv_lora_rank=cfg.kv_lora_rank,
+            q_lora_rank=cfg.q_lora_rank,
+            qk_nope_head_dim=cfg.qk_nope_head_dim,
+            qk_rope_head_dim=cfg.qk_rope_head_dim,
+            v_head_dim=cfg.v_head_dim,
         )
+        if cfg.attn_type == "mla":
+            self.attn = MultiLatentAttention(attn_cfg)
+        elif cfg.attn_type == "mha":
+            self.attn = CausalSelfAttention(attn_cfg)
+        else:
+            raise ValueError(f"Unknown attn_type={cfg.attn_type!r}")
+
         self.norm2 = make_norm(cfg.hidden, cfg.norm_type, eps=cfg.norm_eps)
         intermediate = cfg.intermediate or _default_intermediate(cfg.hidden, cfg.mlp_type)
 
@@ -90,6 +114,13 @@ class Block(nn.Module):
             moe_kwargs.pop("intermediate", None)
             moe_cfg = MoEConfig(hidden=cfg.hidden, intermediate=intermediate, **moe_kwargs)
             self.mlp = MoEFFN(moe_cfg)
+        elif cfg.mlp_type == "factff":
+            self.mlp = make_mlp(
+                cfg.hidden,
+                intermediate,
+                cfg.mlp_type,
+                factorize_rank=int(cfg.mlp_factorize_rank),
+            )
         else:
             self.mlp = make_mlp(cfg.hidden, intermediate, cfg.mlp_type)
 

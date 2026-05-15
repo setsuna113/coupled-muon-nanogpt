@@ -1,0 +1,21 @@
+# Phase-2 Tier A1 (3/3) — Pair-selection at production rung I, full coupling.
+# Self-consistency check vs Phase-1's I-CoupledMuon production cells; same
+# defaults as `lr_grid_moe_pt1_production.yaml`'s I-CoupledMuon arm but with
+# the Phase-2 `ns_coefficients` knob forced to bernstein. If results match
+# Phase-1's pt1B I-CoupledMuon@lr1e-2, the Phase-2 sweep framework is
+# behaving correctly across the pair-policy boundary.
+# 5 cells = 1 policy × 5 seeds.
+base: configs/ladder/I_moe.yaml
+grid:
+  seed: [0, 1, 2, 3, 4]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.lr: 1.0e-2
+  optimizer.coupled_steps: 4
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  optimizer.couple_qk: true
+  optimizer.couple_vo: true
+  optimizer.couple_updown: true
+  run.wandb_project: coupled-muon-pair-policy
+  run.wandb_group: "${name}/policy_all"

@@ -1,0 +1,24 @@
+# Phase-2 Tier S1 — Newton-Schulz coefficient policy sweep at A0 (60M-CS dense).
+# Defends every CoupledMuon-vs-Muon delta against the "did a better NS policy
+# close the gap?" attack (suggestion.md §1.3 / S1).
+#
+# 36 cells = 2 optimizers × 3 policies × 3 K values × 2 seeds. The full grid
+# product would be 108 (also crosses optimizer.coupled_steps × optimizer.ns_steps);
+# curate the JSONL post-`expand.py` to keep only cells where coupled_steps and
+# ns_steps both equal the same K (so plain-Muon and coupled-Muon both walk the
+# same K-axis). A jq filter is the standard post-expansion step here:
+#   jq -c 'select(.overrides["optimizer.coupled_steps"] == .overrides["optimizer.ns_steps"])'
+#
+# Lives on R_abl (2×H200), ~1 h/cell, ~1.5 rig-days.
+base: configs/ladder/A0_llama60m.yaml
+grid:
+  optimizer.type: [muon, coupled_muon_v2]
+  optimizer.ns_coefficients: [bernstein, polar_express, cesista]
+  optimizer.coupled_steps: [3, 5, 8]
+  optimizer.ns_steps: [3, 5, 8]
+  seed: [0, 1]
+fixed:
+  optimizer.lr: 3.0e-3
+  optimizer.ns_gram_form: false
+  run.wandb_project: coupled-muon-ns-policy
+  run.wandb_group: "${name}/opt${optimizer.type}_pol${optimizer.ns_coefficients}_k${optimizer.coupled_steps}"

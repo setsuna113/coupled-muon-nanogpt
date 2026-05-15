@@ -1,0 +1,63 @@
+# Ladder rung O_mla — Phase-2 MLA rung at 60M-CS (suggestion.md S2 / §2.4).
+# I's SwiGLU MoE backbone (hidden=512, n_layers=8, n_heads=8, every-other MoE,
+# 8 experts top-2) with attention replaced by DeepSeek-V2/V3-style MLA. The
+# headline novel architecture for Phase 2:
+#   - KV down-up factored pair (W_DKV, W_UK), (W_DKV, W_UV) — natively factored
+#   - Optional low-rank Q (W_DQ, W_UQ) when q_lora_rank > 0 — natively factored
+# CoupledMuon couples all three pairs via `coupled_mla_kv` / `coupled_mla_q`.
+# `use_multi_head=false` — MLA's split nope/rope per-head layout doesn't fit
+# the multi-head Q-K reshape path; flat-2D coupling is the correct route.
+name: ladder_O_mla
+
+model:
+  hidden: 512
+  n_layers: 8
+  attn:
+    n_heads: 8
+    qk_norm: false              # MLA's split-head structure subsumes QK-Norm role
+    attn_type: mla
+    kv_lora_rank: 64
+    q_lora_rank: 64
+    qk_nope_head_dim: 32
+    qk_rope_head_dim: 32
+    v_head_dim: 64
+  mlp:
+    type: swiglu
+    intermediate: 1408
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 8
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_coef: 0.01
+    z_loss_coef: 1.0e-3
+    balancing_type: aux_loss
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: false          # MLA: flat-2D coupling on (UK,DKV), (UV,DKV), (UQ,DQ)
+  couple_mla: true
+  couple_router_to_muon: true
+
+train:
+  total_tokens: 5_000_000_000
+  seq_len: 2048
+  local_batch_size: 8
+  grad_accum_steps: 16
+  warmup_steps: 500
+  log_every_steps: 25
+  eval_every_steps: 1000
+  val_tokens: 5_000_000
+  probes:
+    svd_interval_tokens: 500_000_000
+    coupled_pair_interval_tokens: 500_000_000
+    attn_logit_interval_tokens: 50_000_000
+    moe_load_interval_tokens: 50_000_000
+    pair_factor_ratio_interval_tokens: 100_000_000

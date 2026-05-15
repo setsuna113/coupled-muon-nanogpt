@@ -6,8 +6,18 @@ from datetime import datetime
 
 # This code snippet is a modified version adapted from the following GitHub repository:
 # https://github.com/KellerJordan/Muon/blob/master/muon.py
+#
+# Phase-2 extension: accepts an optional per-step coefficient tensor `coeffs`
+# of shape (K, 3) for the NS-policy sweep (see optim/ns_coefficients.py).
+# When `coeffs is None`, falls through to the canonical Bernstein triple —
+# preserves Phase-1 numerics bitwise. The `gram_form` flag is reserved for the
+# Zhang–Amsel–Chen–Dao 2026 Gram-NS variant; the real kernel is deferred to
+# Phase 2.5 (the standard form is already X·X^T-based internally, so the
+# expected speedup is marginal at the user's matrix sizes — implementation
+# left to the actual Gram-NS coefficient table being read). The flag is wired
+# through so sweep YAMLs can set it without a code change later.
 @torch.compile
-def zeropower_via_newtonschulz5(G, steps, dtype=torch.bfloat16):
+def zeropower_via_newtonschulz5(G, steps, dtype=torch.bfloat16, coeffs=None, gram_form: bool = False):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
     quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
@@ -18,19 +28,29 @@ def zeropower_via_newtonschulz5(G, steps, dtype=torch.bfloat16):
     performance at all relative to UV^T, where USV^T = G is the SVD.
     """
     assert len(G.shape) == 2
-    a, b, c = (3.4445, -4.7750, 2.0315)
     X = G.to(dtype)
     if G.size(0) > G.size(1):
         X = X.T
     # Ensure spectral norm is at most 1
     X = X / (X.norm() + 1e-7)
     # Perform the NS iterations
-    for _ in range(steps):
-        A = X @ X.T
-        B = (
-            b * A + c * A @ A
-        )  # adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
-        X = a * X + B @ X
+    if coeffs is None:
+        a, b, c = (3.4445, -4.7750, 2.0315)
+        for _ in range(steps):
+            A = X @ X.T
+            B = (
+                b * A + c * A @ A
+            )  # adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
+            X = a * X + B @ X
+    else:
+        coeffs = coeffs.to(device=X.device)
+        for k in range(steps):
+            a = coeffs[k, 0]
+            b = coeffs[k, 1]
+            c = coeffs[k, 2]
+            A = X @ X.T
+            B = b * A + c * A @ A
+            X = a * X + B @ X
 
     if G.size(0) > G.size(1):
         X = X.T
@@ -39,14 +59,16 @@ def zeropower_via_newtonschulz5(G, steps, dtype=torch.bfloat16):
 
 
 @torch.compile
-def coupled_newtonschulz5_B(M_B, A, steps, dtype=torch.bfloat16):
+def coupled_newtonschulz5_B(M_B, A, steps, dtype=torch.bfloat16, coeffs=None):
     """
     Coupled Newton-Schulz for matrix B with coupling to matrix A.
     M_{B,t+1} = 3.4445 M_{B,t} - 4.7750 (M_{B,t} M_{B,t}^T A^T A) M_{B,t} + 2.0315 (M_{B,t} M_{B,t}^T A^T A)^2 M_{B,t}
+
+    Phase-2 extension: optional per-step coefficient tensor `coeffs` of shape
+    (K, 3); when None, falls back to the Bernstein triple (Phase-1 numerics).
     """
     assert len(M_B.shape) == len(A.shape)
     #assert len(M_B.shape) in (2, 3, 4)
-    a, b, c = (3.4445, -4.7750, 2.0315)
     X = M_B.to(dtype)
     A = A.to(dtype)
 
@@ -55,37 +77,63 @@ def coupled_newtonschulz5_B(M_B, A, steps, dtype=torch.bfloat16):
         #X = X / (X.norm()*A_bf16.norm() + 1e-7)
         X = X / ((A @ X).norm() + 1e-7)
 
-        for step_idx in range(steps):
-            # Compute M_{B,t} M_{B,t}^T A^T A
-            W = A @ X
-            WTW = W.T @ W
-            # B = b * MMATA + c * MMATA^2
-            T = b * WTW + c * (WTW @ WTW)
-            X = a * X + X @ T
+        if coeffs is None:
+            a, b, c = (3.4445, -4.7750, 2.0315)
+            for step_idx in range(steps):
+                # Compute M_{B,t} M_{B,t}^T A^T A
+                W = A @ X
+                WTW = W.T @ W
+                # B = b * MMATA + c * MMATA^2
+                T = b * WTW + c * (WTW @ WTW)
+                X = a * X + X @ T
+        else:
+            coeffs = coeffs.to(device=X.device)
+            for step_idx in range(steps):
+                a = coeffs[step_idx, 0]
+                b = coeffs[step_idx, 1]
+                c = coeffs[step_idx, 2]
+                W = A @ X
+                WTW = W.T @ W
+                T = b * WTW + c * (WTW @ WTW)
+                X = a * X + X @ T
     else:
         W = A @ X
         X = X / (W.norm(dim=(-2,-1)).unsqueeze(-1).unsqueeze(-1) + 1e-7)
 
         ATA = A.transpose(-1, -2) @ A
-        for step_idx in range(steps):
-            XXT = X @ X.transpose(-1, -2)
-            MMATA = XXT @ ATA
-            B = b * MMATA + c * (MMATA @ MMATA)
-            X = a * X + B @ X
+        if coeffs is None:
+            a, b, c = (3.4445, -4.7750, 2.0315)
+            for step_idx in range(steps):
+                XXT = X @ X.transpose(-1, -2)
+                MMATA = XXT @ ATA
+                B = b * MMATA + c * (MMATA @ MMATA)
+                X = a * X + B @ X
+        else:
+            coeffs = coeffs.to(device=X.device)
+            for step_idx in range(steps):
+                a = coeffs[step_idx, 0]
+                b = coeffs[step_idx, 1]
+                c = coeffs[step_idx, 2]
+                XXT = X @ X.transpose(-1, -2)
+                MMATA = XXT @ ATA
+                B = b * MMATA + c * (MMATA @ MMATA)
+                X = a * X + B @ X
     # Returned dtype matches the kernel dtype the caller chose; the consuming code
     # casts back when it writes into the (typically bf16) parameter buffer.
     return X
 
 
 @torch.compile
-def coupled_newtonschulz5_A(M_A, B, steps, dtype=torch.bfloat16):
+def coupled_newtonschulz5_A(M_A, B, steps, dtype=torch.bfloat16, coeffs=None):
     """
     Coupled Newton-Schulz for matrix A with coupling to matrix B.
     M_{A,t+1} = 3.4445 M_{A,t} - 4.7750 M_{A,t} (B B^T M_{A,t}^T M_{A,t}) + 2.0315 M_{A,t} (B B^T M_{A,t}^T M_{A,t})^2
+
+    Phase-2 extension: optional per-step coefficient tensor `coeffs` of shape
+    (K, 3); when None, falls back to the Bernstein triple (Phase-1 numerics).
     """
     assert len(M_A.shape) == len(B.shape)
     assert len(M_A.shape) in (2, 3, 4)
-    a, b, c = (3.4445, -4.7750, 2.0315)
     X = M_A.to(dtype)
     B = B.to(dtype)
 
@@ -93,21 +141,45 @@ def coupled_newtonschulz5_A(M_A, B, steps, dtype=torch.bfloat16):
         # Normalize
         #X = X / (X.norm()*B_bf16.norm() + 1e-7)
         X = X / ((X @ B).norm() + 1e-7)
-        for step_idx in range(steps):
-            W = X @ B
-            WWT = W @ W.T
-            T = b * WWT + c * (WWT @ WWT)
-            X = a * X + T @ X
+        if coeffs is None:
+            a, b, c = (3.4445, -4.7750, 2.0315)
+            for step_idx in range(steps):
+                W = X @ B
+                WWT = W @ W.T
+                T = b * WWT + c * (WWT @ WWT)
+                X = a * X + T @ X
+        else:
+            coeffs = coeffs.to(device=X.device)
+            for step_idx in range(steps):
+                a = coeffs[step_idx, 0]
+                b = coeffs[step_idx, 1]
+                c = coeffs[step_idx, 2]
+                W = X @ B
+                WWT = W @ W.T
+                T = b * WWT + c * (WWT @ WWT)
+                X = a * X + T @ X
     else:
         W = X @ B
         X = X / (W.norm(dim=(-2, -1)).unsqueeze(-1).unsqueeze(-1) + 1e-7)
 
         BBT = B @ B.transpose(-1, -2)
-        for step_idx in range(steps):
-            XTX = X.transpose(-1, -2) @ X
-            BBTMM = BBT @ XTX
-            B_term = b * BBTMM + c * BBTMM @ BBTMM
-            X = a * X + X @ B_term
+        if coeffs is None:
+            a, b, c = (3.4445, -4.7750, 2.0315)
+            for step_idx in range(steps):
+                XTX = X.transpose(-1, -2) @ X
+                BBTMM = BBT @ XTX
+                B_term = b * BBTMM + c * BBTMM @ BBTMM
+                X = a * X + X @ B_term
+        else:
+            coeffs = coeffs.to(device=X.device)
+            for step_idx in range(steps):
+                a = coeffs[step_idx, 0]
+                b = coeffs[step_idx, 1]
+                c = coeffs[step_idx, 2]
+                XTX = X.transpose(-1, -2) @ X
+                BBTMM = BBT @ XTX
+                B_term = b * BBTMM + c * BBTMM @ BBTMM
+                X = a * X + X @ B_term
     return X
 
 
@@ -191,6 +263,14 @@ class CoupledMuon_v2(torch.optim.Optimizer):
         n_heads=1,
         # dtype for Newton-Schulz iterates (per experiment.md d.6.3 fp32 diagnostic).
         ns_dtype: torch.dtype = torch.bfloat16,
+        # Phase-2 NS-policy / LR-prefactor axes. Defaults preserve Phase-1
+        # numerics exactly (`bernstein` ⇒ `coeffs=None` is passed to the NS
+        # kernels; `moonlight` ⇒ existing `0.2·√max(A,B)` LR scaling;
+        # `ns_gram_form=False` ⇒ standard form). See optim/ns_coefficients.py
+        # and experiment.md d.3 for the policy menu.
+        ns_coefficients: str = "bernstein",
+        ns_gram_form: bool = False,
+        lr_prefactor: str = "moonlight",
     ):
         coupled_pairs = coupled_pairs or []
         muon_params = muon_params or []
@@ -226,6 +306,42 @@ class CoupledMuon_v2(torch.optim.Optimizer):
         self.ns_dtype = ns_dtype
         # crossfade configuration
         self.iter_num = 0
+
+        # Phase-2 NS-policy bookkeeping. Precompute the coefficient tensors
+        # once at __init__; passed into the NS kernels every step (broadcast
+        # to the right device on first use). When the policy is `bernstein`,
+        # we deliberately keep coeffs=None so the kernel falls back to the
+        # hardcoded Phase-1 path — bitwise-identical numerics.
+        from .ns_coefficients import get_coefficients, coefficients_to_tensor
+
+        self.ns_coefficients_policy = str(ns_coefficients).lower()
+        self.ns_gram_form = bool(ns_gram_form)
+        self.lr_prefactor = str(lr_prefactor).lower()
+
+        if self.ns_coefficients_policy == "bernstein":
+            self._coeffs_stage1 = None
+            self._coeffs_stage2 = None
+        else:
+            self._coeffs_stage1 = coefficients_to_tensor(
+                get_coefficients(self.ns_coefficients_policy, int(coupled_steps))
+            )
+            self._coeffs_stage2 = coefficients_to_tensor(
+                get_coefficients(self.ns_coefficients_policy, int(ns_steps))
+            )
+
+        if self.ns_gram_form:
+            # Reserved for the Zhang–Amsel–Chen–Dao 2026 Gram-NS variant.
+            # Phase-2 wires the flag through but the kernel is currently a
+            # passthrough to the standard form. Tracking this in `experiment.md`
+            # so sweep YAMLs can light up the knob without surprises.
+            import warnings
+            warnings.warn(
+                "optimizer.ns_gram_form=true requested but the Phase-2 Gram-NS "
+                "kernel is currently a passthrough to the standard form. The "
+                "flag is forwarded for compatibility; numerics match standard "
+                "NS. See optim/ns_coefficients.py docstring.",
+                stacklevel=2,
+            )
         for param_A, param_B, n_heads, is_qk in coupled_pairs:
             assert param_A.ndim == 2 and param_B.ndim == 2
             self.state[param_A]["use_coupled"] = True
@@ -259,8 +375,30 @@ class CoupledMuon_v2(torch.optim.Optimizer):
         self.enable_coupled = enabled
 
     def adjust_lr_for_muon(self, lr, param_shape):
+        """Per-parameter LR scaling. The default (`moonlight`) matches Phase-1's
+        ``0.2·√max(A,B)`` (Moonlight Lemma 1). Phase-2 adds two alternatives:
+
+        - ``bernstein_ratio``: ``0.2·√(d_out/d_in)`` (Bernstein–Newhouse 2024;
+          Cesista per-row normalisation argument).
+        - ``cesista``: ``0.2·√max(A,B) / (1 + log(K+1))`` — per-step normalised.
+        """
         A, B = param_shape[:2]
-        adjusted_ratio = 0.2 * math.sqrt(max(A, B))
+        policy = self.lr_prefactor
+        if policy == "moonlight":
+            adjusted_ratio = 0.2 * math.sqrt(max(A, B))
+        elif policy == "bernstein_ratio":
+            # Avoid divide-by-zero on degenerate shapes.
+            denom = max(B, 1)
+            adjusted_ratio = 0.2 * math.sqrt(A / denom)
+        elif policy == "cesista":
+            # K is the stage-1 step count; falls back to ns_steps for plain Muon paths.
+            K = max(int(self.coupled_steps), 1)
+            adjusted_ratio = 0.2 * math.sqrt(max(A, B)) / (1.0 + math.log(K + 1))
+        else:
+            raise ValueError(
+                f"Unknown lr_prefactor={policy!r}. "
+                f"Supported: moonlight | bernstein_ratio | cesista."
+            )
         return lr * adjusted_ratio
 
     def step(self, closure=None):
@@ -331,8 +469,8 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                                 p_A_reshaped = param_A.data.view(state_A["num_heads"], 2, head_dim//2, I).permute(0, 2, 3, 1).contiguous()
                                 p_B_reshaped = param_B.data.view(state_B["num_heads"], 2, head_dim//2, I).permute(0, 2, 1, 3).contiguous()
 
-                                u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype)
-                                u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype)
+                                u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+                                u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
 
                                 u_A_c = u_A_c.permute(0, 3, 1, 2).contiguous().reshape(HD, I)
                                 u_B_c = u_B_c.permute(0, 2, 1, 3).contiguous().reshape(HD_B, I_B)
@@ -344,8 +482,8 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                                     p_A_reshaped = param_A.data.view(n_heads_group, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 4, 2).contiguous()
                                     p_B_reshaped = param_B.data.view(1, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 2, 4).contiguous()
 
-                                    u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype)
-                                    u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype)
+                                    u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+                                    u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
 
                                     u_A_c = u_A_c.permute(0, 1, 4, 2, 3).contiguous().reshape(HD, I)
                                     u_B_c = u_B_c.mean(dim=0).permute(0, 2, 1, 3).contiguous().reshape(HD_B, I_B)
@@ -356,8 +494,8 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                                     p_A_reshaped = param_A.data.view(1, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 4, 2).contiguous()
                                     p_B_reshaped = param_B.data.view(n_heads_group, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 2, 4).contiguous()
 
-                                    u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype)
-                                    u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype)
+                                    u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+                                    u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
 
                                     u_A_c = u_A_c.mean(dim=0).permute(0, 3, 1, 2).contiguous().reshape(HD, I)
                                     u_B_c = u_B_c.permute(0, 1, 3, 2, 4).contiguous().reshape(HD_B, I_B)
@@ -372,14 +510,14 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                             p_A_reshaped = param_A.data.view(O, state_A["num_heads"], head_dim).permute(1, 0, 2)
                             p_B_reshaped = param_B.data.view(state_B["num_heads"], head_dim, I)
 
-                            u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype)
-                            u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype)
+                            u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+                            u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
 
                             u_A_c = u_A_c.permute(1, 0, 2).reshape(O, HD)
                             u_B_c = u_B_c.reshape(HD_B, I)
                     else:
-                        u_A_c = coupled_newtonschulz5_A(g_A_eff, param_B.data, steps=self.coupled_steps, dtype=self.ns_dtype)
-                        u_B_c = coupled_newtonschulz5_B(g_B_eff, param_A.data, steps=self.coupled_steps, dtype=self.ns_dtype)
+                        u_A_c = coupled_newtonschulz5_A(g_A_eff, param_B.data, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+                        u_B_c = coupled_newtonschulz5_B(g_B_eff, param_A.data, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
 
                     # Stage-1 norm capture: per-pair Frobenius norm of the
                     # post-coupled-NS iterate, cheap (~one .norm() call). Probe
@@ -391,8 +529,8 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                         # Stage 2 (default): plain NS on stage-1 output, so
                         # ‖U_A‖_spec ≈ 1 and the matrix-size LR scaling is
                         # well-defined. See class docstring; experiment.md a.2.
-                        u_A = zeropower_via_newtonschulz5(u_A_c, steps=ns_steps, dtype=self.ns_dtype)
-                        u_B = zeropower_via_newtonschulz5(u_B_c, steps=ns_steps, dtype=self.ns_dtype)
+                        u_A = zeropower_via_newtonschulz5(u_A_c, steps=ns_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form)
+                        u_B = zeropower_via_newtonschulz5(u_B_c, steps=ns_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form)
                     else:
                         # Stage-1-only ablation (experiment.md d.4 final_polish row):
                         # use the coupled iterate directly. ‖u‖_spec is uncontrolled;
@@ -403,8 +541,8 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                 else:
                     # coupled_steps == 0 or enable_coupled == False: plain Muon path
                     # on the same momentum-buffered gradients the standard-Muon block uses.
-                    u_A = zeropower_via_newtonschulz5(g_A_eff, steps=ns_steps, dtype=self.ns_dtype)
-                    u_B = zeropower_via_newtonschulz5(g_B_eff, steps=ns_steps, dtype=self.ns_dtype)
+                    u_A = zeropower_via_newtonschulz5(g_A_eff, steps=ns_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form)
+                    u_B = zeropower_via_newtonschulz5(g_B_eff, steps=ns_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form)
 
 
                 # Apply updates
@@ -441,7 +579,7 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                 else:
                     g = buf
 
-                u = zeropower_via_newtonschulz5(g, steps=ns_steps, dtype=self.ns_dtype)
+                u = zeropower_via_newtonschulz5(g, steps=ns_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form)
 
                 adjusted_lr = self.adjust_lr_for_muon(lr, p.shape)
                 p.data.mul_(1 - lr * wd).add_(u, alpha=-adjusted_lr)

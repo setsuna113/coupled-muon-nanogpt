@@ -1,0 +1,19 @@
+# Phase-2 Tier A3 (1/2) — AdamW seed/LR equalization at I.
+# Phase-1's pt1A AdamW anchor at I was 3 seeds × 5 LRs (15 cells); the
+# Muon-family at I had 5 seeds × 3 LRs. Equalize AdamW to 5 × 5 to close
+# the asymmetric-tuning attack (suggestion.md A3 / Hyperparameter Transfer
+# 2025 NeurIPS critique).
+#
+# 10 additional cells = 5 LRs × 2 seeds (Phase-1 covered seeds 0/1/2).
+# Concatenate with the I' equivalent for the full A3 sweep. Lands in the
+# existing wandb project (`coupled-muon-moe-anchor-adamw`) so the cells
+# slot beside Phase-1's pt1A rows. Lives on R_prod (4×H200), ~3 h/cell,
+# ~1.25 rig-days.
+bases:
+  - configs/ladder/I_moe.yaml
+grid:
+  optimizer.type: [adamw]
+  optimizer.lr: [3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3]
+  seed: [3, 4]
+fixed:
+  run.wandb_project: coupled-muon-moe-anchor-adamw

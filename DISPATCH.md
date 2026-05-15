@@ -70,3 +70,59 @@ T=0 Rig B launch. Stage 3 cell budget cut from the full 350 (in
 - Per-cell `metrics.jsonl` — canonical numeric record (loss, val_loss, probe outputs). Read this for analysis; `wandb sync` is a nice-to-have, not the source of truth.
 - Per-cell `stdout.log` — `[saved_ckpt]` substring marks completion (used by `archive_finished.sh` and `check_progress.sh`).
 - Per-cell `wandb/offline-run-*/` — for upload to wandb cloud via `wandb sync <run_dir>` (requires the run to have started in offline mode; an online-mode failed init won't produce an offline-run dir).
+
+---
+
+## Active dispatch (Phase 2)
+
+Phase 2 adds three new lanes of cells across the three idle rigs. The headline goal is the **MLA cross-optimizer triple at O_mla** plus an NS-policy defence (S1) and an AdamW-tuning equalizer (A3). See `experiment.md` §d.7 for the design rationale. Total expansion ≈ 207 cells, ~18 rig-days work against the +22 rig-day generous budget.
+
+| Rig | Sweeps (run in order) | Cells | Wandb project(s) | Results dir |
+|---|---|---|---|---|
+| **R_abl — 2×H200** | `ns_coeff_K_sweep` (S1, 36) → `k_curve_at_winner` (S3, 18) → `lr_prefactor_ablation` (A2, 16) → `imposed_factff` (B3, 12) | 82 | `coupled-muon-ns-policy`, `coupled-muon-k-curve`, `coupled-muon-lr-prefactor`, `coupled-muon-imposed-factff` | `$GLOBAL/phase2-rigC-{ns-policy,k-curve,lr-prefactor,imposed-factff}/` |
+| **R_prod — 4×H200** | `mla_lr_grid` (S2, 45) → `pair_policy_{attn_only,ffn_only,all}` (A1, 15) → `adamw_equalization_I` (A3.I, 10) → `mla_scaling_350m` (stretch, 30 — conditional) | 100 | `coupled-muon-mla`, `coupled-muon-pair-policy`, `coupled-muon-moe-anchor-adamw`, `coupled-muon-mla-350m` | `$GLOBAL/phase2-rigA-{mla,pair-policy,adamw-I,mla-350m}/` |
+| **R_screen — 8×H100** | `adamw_equalization_I_prime` (A3.I', 10) → `lora_rank_sweep` (B1, 15) | 25 | `coupled-muon-moe-anchor-adamw-Iprime`, `coupled-muon-lora-rank` | `$GLOBAL/phase2-rigB-{adamw-Iprime,lora-rank}/` |
+
+### Phase-2 timeline (T=0 = Phase-2 launch)
+
+| T (rig-days) | Event |
+|---|---|
+| 0     | R_abl starts S1; R_prod starts S2 (Bernstein default — winner backfilled at T+1.5d); R_screen starts A3.I'. |
+| 0.25  | R_screen finishes A3.I'. Starts B1. |
+| 1.5   | R_abl finishes S1. **MILESTONE: NS-policy winner declared.** Re-emit S3/S2/A1/B1/stretch JSONLs with the winner's `optimizer.ns_coefficients` value. |
+| 2.15  | R_screen finishes B1. R_screen idle. |
+| 2.25  | R_abl finishes S3. Starts A2. |
+| 2.92  | R_abl finishes A2. Starts B3. |
+| 3.42  | R_abl finishes B3. R_abl idle. |
+| 5.6   | R_prod finishes S2. **MILESTONE: O_mla cross-optimizer triple done. 350M-stretch GO/NO-GO decision.** |
+| 7.5   | R_prod finishes A1 + A3.I (cumulative). |
+| ~15.3 | R_prod finishes 350M stretch (if commissioned; sequential 4-GPU DDP). All Phase 2 complete. |
+
+### Phase-2 dependencies
+
+- **S1 → {S3, S2, A1, B1, stretch}** — the winning NS policy backfills the
+  `optimizer.ns_coefficients` fixed value for these sweeps. In-flight
+  Bernstein cells from S2 remain valid as a "Bernstein baseline" half-grid;
+  remaining cells are re-launched with the winner.
+- **O_mla S2 → 350M stretch** — gating rule: at T+5.6 d, read out the
+  bootstrap CI on the median val-loss gap at the best LR per optimizer;
+  commission stretch only if `gap_p50 > 1.5 × pooled_seed_std`. If gap is
+  unresolved, drop the 30 stretch cells (saves ~3.75–7.5 R_prod rig-days).
+- **A3** is independent — runs in parallel with everything else.
+
+### Pre-launch hygiene (Phase 2 specific)
+
+1. `git pull` to pick up the Phase-2 code: `optim/ns_coefficients.py`, the
+   MLA layer in `model/attention.py`, the `FactorizedMLP` in `model/mlp.py`,
+   the `pair_factor_ratio` probe in `probes/`, the new ladder/sweep YAMLs.
+2. Update `scripts/check_progress.sh` `RIGS` array to add the new Phase-2
+   results dirs.
+3. **Tests on the cluster** before launch: `uv run pytest tests/test_ns_coefficients.py tests/test_lr_prefactor.py tests/test_ns_gram_form.py tests/test_mla_forward_and_pairs.py tests/test_factorized_mlp_pair.py tests/test_phase2_ladder_configs_load.py tests/test_pair_factor_ratio_probe.py` — local dev box lacks cudnn so these were syntax-checked only.
+4. Replace `optimizer.ns_coefficients: bernstein` in S3, S2, A1, B1, and the
+   350M-stretch sweep YAMLs with the S1 winner before re-launch at T+1.5d.
+   Convention: keep Bernstein as the committed default so the YAML survives
+   resume semantics if S1 names Bernstein the winner.
+5. **Polar Express / Cesista coefficient tables are approximate** in
+   `optim/ns_coefficients.py` (see module docstring). Before the headline
+   publication run, patch in the canonical values from the published
+   supplements / NVIDIA `emerging-optimizers` reference.

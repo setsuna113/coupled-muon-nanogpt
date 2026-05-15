@@ -1,0 +1,61 @@
+# Stretch rung Z_350m_mla — Z_350m_dense + MLA + MoE. The MLA scaling-trend
+# claim (suggestion.md §5 generous: "Second MLA rung at smaller scale (scaling
+# claim)" rescoped to 350M). kv_lora_rank=128, q_lora_rank=128; 8-expert top-2
+# MoE every-other. ~480M total / ~110M active. ~12 h/seed on R_prod.
+# Conditional dispatch: only commission this rung if O_mla's CoupledMuon-vs-
+# Muon gap at matched LR/seeds is statistically resolved (DISPATCH.md Phase-2
+# gating rule).
+name: ladder_Z_350m_mla
+
+model:
+  hidden: 1024
+  n_layers: 18
+  attn:
+    n_heads: 16
+    qk_norm: false
+    attn_type: mla
+    kv_lora_rank: 128
+    q_lora_rank: 128
+    qk_nope_head_dim: 32
+    qk_rope_head_dim: 32
+    v_head_dim: 64
+  mlp:
+    type: swiglu
+    intermediate: 2816
+  norm:
+    type: rmsnorm
+  pos_emb:
+    type: rope
+  moe:
+    enabled: true
+    num_experts: 8
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_coef: 0.01
+    z_loss_coef: 1.0e-3
+    balancing_type: aux_loss
+
+optimizer:
+  type: coupled_muon_v2
+  lr: 3.0e-3
+  coupled_steps: 4
+  ns_steps: 5
+  use_multi_head: false
+  couple_mla: true
+  couple_router_to_muon: true
+
+train:
+  total_tokens: 7_000_000_000
+  seq_len: 2048
+  local_batch_size: 4
+  grad_accum_steps: 32              # MoE memory; global batch ≈ 0.5M tokens
+  warmup_steps: 1000
+  log_every_steps: 50
+  eval_every_steps: 2000
+  val_tokens: 10_000_000
+  probes:
+    svd_interval_tokens: 1_000_000_000
+    coupled_pair_interval_tokens: 1_000_000_000
+    attn_logit_interval_tokens: 100_000_000
+    moe_load_interval_tokens: 100_000_000
+    pair_factor_ratio_interval_tokens: 500_000_000

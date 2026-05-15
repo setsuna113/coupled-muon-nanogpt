@@ -34,12 +34,26 @@ model:
     qk_norm: false
     rope_partial_frac: 1.0      # 0.5 ⇒ modded-nanogpt half-RoPE
     pos_emb_unused_placeholder: 0  # placeholder so the section validates
+    # Phase-2 MLA fields (rung O_mla; suggestion.md S2). attn_type="mha" keeps
+    # the existing CausalSelfAttention path. "mla" requires kv_lora_rank > 0
+    # and positive qk_nope_head_dim / qk_rope_head_dim / v_head_dim. The
+    # optional low-rank Q path is enabled when q_lora_rank > 0.
+    attn_type: mha              # mha | mla
+    kv_lora_rank: 0
+    q_lora_rank: 0
+    qk_nope_head_dim: 0
+    qk_rope_head_dim: 0
+    v_head_dim: 0
   pos_emb:
     type: rope                  # rope | learned
     rope_base: 10000.0
   mlp:
-    type: swiglu                # swiglu | gelu_2mat | relu2
+    type: swiglu                # swiglu | gelu_2mat | relu2 | factff
     intermediate: 0             # 0 ⇒ inferred per mlp.type
+    # Phase-2 imposed-FFN-factorisation (rung P_factff / Tier B3). Only used
+    # when type=="factff"; sets the bottleneck rank for the (factff_up,
+    # factff_down) pair. Coupled by default via optimizer.couple_factff.
+    factorize_rank: 0
   moe:
     enabled: false
     num_experts: 8
@@ -83,6 +97,18 @@ optimizer:
   # Cerebras nanoMoE) routes MoE routers through Muon. False → AdamW (rung J
   # ablation, DeepSeek-V2/V3/OLMoE-style). See experiment.md c.3.
   couple_router_to_muon: true
+  # Phase-2 NS-policy / Gram-form / LR-prefactor knobs (suggestion.md S1 / A2,
+  # experiment.md d.3 Phase-2 protocol). Defaults preserve Phase-1 numerics
+  # bitwise: `bernstein` ⇒ hardcoded (3.4445, -4.7750, 2.0315) triple,
+  # `moonlight` ⇒ `0.2·√max(A,B)`. See optim/ns_coefficients.py for tables.
+  ns_coefficients: bernstein    # bernstein | polar_express | cesista
+  ns_gram_form: false           # reserved; Phase-2 framework only, kernel TBD
+  lr_prefactor: moonlight       # moonlight | bernstein_ratio | cesista
+  # Phase-2 factored-architecture coupling toggles. No-ops when the relevant
+  # projections are absent from the model — kept here so sweep YAMLs can
+  # ablate them at rungs O_mla and P_factff.
+  couple_mla: true
+  couple_factff: true
 
 train:
   total_tokens: 100_000_000     # smoke default; ladder configs override
@@ -101,3 +127,7 @@ train:
     attn_logit_interval_tokens: 5_000_000
     moe_load_interval_tokens: 0       # MoE-only; ladder/I_moe and smoke/I_moe override
     ns_internal_interval_tokens: 0    # diagnostic-only; per d.6.3
+    # Phase-2 LoRA-RITE one-factor-dominates probe (suggestion.md §2.7). Zero
+    # compute cost (two .norm() per pair). Off by default; rungs O_mla,
+    # P_factff and Stage-3 production sweeps will turn it on.
+    pair_factor_ratio_interval_tokens: 0

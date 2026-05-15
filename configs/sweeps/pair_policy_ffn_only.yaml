@@ -1,0 +1,17 @@
+# Phase-2 Tier A1 (2/3) — Pair-selection at production rung I, FFN-only.
+# Couple FFN up-down only; attention pairs (Q-K, V-O) OFF.
+# 5 cells = 1 policy × 5 seeds.
+base: configs/ladder/I_moe.yaml
+grid:
+  seed: [0, 1, 2, 3, 4]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.lr: 1.0e-2
+  optimizer.coupled_steps: 4
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  optimizer.couple_qk: false
+  optimizer.couple_vo: false
+  optimizer.couple_updown: true
+  run.wandb_project: coupled-muon-pair-policy
+  run.wandb_group: "${name}/policy_ffn_only"

@@ -1,0 +1,21 @@
+# Phase-2 stretch — MLA at 350M class for the scaling-trend claim.
+# Conditional dispatch: ONLY commission if O_mla (60M-CS MLA) shows a
+# statistically resolved CoupledMuon-vs-Muon gap. Gating rule per Phase-2
+# plan: read out the bootstrap CI on median val-loss gap at the best LR
+# per optimizer at T+5.6d; commission stretch only if
+# `gap_p50 > 1.5 × pooled_seed_std`.
+#
+# 30 cells = 2 optimizers × 3 LRs × 5 seeds. Lives on R_prod (4×H200);
+# ~12 h/seed sequential 4-GPU DDP → ~15 d wall-clock (matches the Phase-2
+# timeline's T+15.3d).
+#
+# ACTION ITEM (before dispatch): once S1 has named the winning policy,
+# patch `optimizer.ns_coefficients` to that value.
+base: configs/ladder/Z_350m_mla.yaml
+grid:
+  optimizer.type: [muon, coupled_muon_v2]
+  optimizer.lr: [3.0e-3, 1.0e-2, 3.0e-2]
+  seed: [0, 1, 2, 3, 4]
+fixed:
+  optimizer.ns_coefficients: bernstein
+  run.wandb_project: coupled-muon-mla-350m

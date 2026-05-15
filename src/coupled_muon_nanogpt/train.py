@@ -33,6 +33,7 @@ from .probes.coupled_pair import coupled_pair_probe
 from .probes.manager import ProbeManager
 from .probes.moe_load import moe_load_probe
 from .probes.ns_internal import ns_internal_probe
+from .probes.pair_factor_ratio import pair_factor_ratio_probe
 from .probes.svd import svd_probe
 from .utils import cosine_lr, run_id, save_ckpt, seed_all, setup_ddp
 
@@ -72,6 +73,14 @@ def build_model(cfg: Any) -> GPT:
         rope_partial_frac=float(cfg.model.attn.get("rope_partial_frac", 1.0)),
         qk_norm=bool(cfg.model.attn.qk_norm),
         max_seq_len=int(cfg.train.seq_len),
+        # Phase-2 MLA + factff knobs (defaults preserve MHA / non-factored FFN).
+        attn_type=str(cfg.model.attn.get("attn_type", "mha")),
+        kv_lora_rank=int(cfg.model.attn.get("kv_lora_rank", 0)),
+        q_lora_rank=int(cfg.model.attn.get("q_lora_rank", 0)),
+        qk_nope_head_dim=int(cfg.model.attn.get("qk_nope_head_dim", 0)),
+        qk_rope_head_dim=int(cfg.model.attn.get("qk_rope_head_dim", 0)),
+        v_head_dim=int(cfg.model.attn.get("v_head_dim", 0)),
+        mlp_factorize_rank=int(cfg.model.mlp.get("factorize_rank", 0)),
         moe_enabled=bool(cfg.model.moe.enabled),
         moe_cfg=dict(
             num_experts=int(cfg.model.moe.get("num_experts", 8)),
@@ -178,6 +187,12 @@ def main(argv: list[str] | None = None) -> None:
             ns_internal_probe,
             int(probe_cfg.ns_internal_interval_tokens),
             needs_grads=True,
+        )
+    if probe_cfg.get("pair_factor_ratio_interval_tokens", 0):
+        probes.register(
+            "pair_factor_ratio",
+            pair_factor_ratio_probe,
+            int(probe_cfg.pair_factor_ratio_interval_tokens),
         )
 
     # Wandb (rank 0 only). All policy lives in wandb_utils; this module just
