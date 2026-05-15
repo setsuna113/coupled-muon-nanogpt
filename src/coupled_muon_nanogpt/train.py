@@ -241,6 +241,17 @@ def main(argv: list[str] | None = None) -> None:
             "step": step,
             "n_heads": int(cfg.model.attn.n_heads),
             "n_kv_heads": int(cfg.model.attn.get("n_kv_heads") or cfg.model.attn.n_heads),
+            # Forward the live optimizer-coupling flags so pair-aware probes
+            # (e.g. pair_factor_ratio) report only pairs the optimizer
+            # actually couples, not pairs `classify_parameters` would
+            # default-on. Plain-Muon and AdamW paths set the relevant flags
+            # to False in their builders, so we mirror those here.
+            "couple_qk": bool(cfg.optimizer.get("couple_qk", True)) and cfg.optimizer.type == "coupled_muon_v2",
+            "couple_vo": bool(cfg.optimizer.get("couple_vo", True)) and cfg.optimizer.type == "coupled_muon_v2",
+            "couple_updown": bool(cfg.optimizer.get("couple_updown", True)) and cfg.optimizer.type == "coupled_muon_v2",
+            "couple_mla": bool(cfg.optimizer.get("couple_mla", True)) and cfg.optimizer.type == "coupled_muon_v2",
+            "couple_factff": bool(cfg.optimizer.get("couple_factff", True)) and cfg.optimizer.type == "coupled_muon_v2",
+            "couple_router_to_muon": bool(cfg.optimizer.get("couple_router_to_muon", True)),
         }
 
         loss_accum = 0.0

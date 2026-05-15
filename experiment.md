@@ -439,7 +439,11 @@ Scope follows `suggestion.md` Tier S + A + selected B (B1 LoRA-rank, B3 imposed-
 ### d.7.1 New ladder rungs
 
 ```
-O_mla        H with attention → DeepSeek-V2/V3-style MLA:
+O_mla        I (SwiGLU MoE backbone, every-other-layer experts) with
+             attention → DeepSeek-V2/V3-style MLA. The rung compares as
+             I → O_mla — the MoE backbone is held fixed and only the
+             attention block changes — so the optimizer delta cleanly
+             attributes to the factored-KV/Q geometry.
              - KV down-up factored pair (W_DKV, W_UK) — natively factored
              - V up-projection (W_UV) shares W_DKV but is routed to plain Muon
                (CoupledMuon_v2.step's `processed` set rules out two coupled
@@ -468,6 +472,20 @@ Z_350m_mla   Z_350m_dense + MLA (kv_lora_rank=128, q_lora_rank=128) + MoE
              [stretch rung for the MLA scaling-trend claim;
               suggestion.md §5 generous version, rescoped to 350M]
 ```
+
+**Scope note — which "MLA"?** The MLA implementation in
+`model/attention.py:MultiLatentAttention` is the **DeepSeek-V2/V3 design**:
+shared KV down-projection `W_DKV`, per-head up-projections `W_UK`/`W_UV`,
+a flat decoupled-rotary K side `W_KR`, and an optional low-rank Q via
+`W_DQ`/`W_UQ`. It is **not** DeepSeek-V4's Compressed Sparse Attention +
+Lightning-Indexer + manifold-constrained hyper-connections + partial-RoPE
+stack, nor Qwen3-Next's Gated-DeltaNet + Gated-Attention hybrid + ultra-
+sparse MoE, nor Kimi-Linear's KDA per-channel-decay factor. Those
+architectures are Phase-3 stretch territory (suggestion.md Tier B2 + the
+Z_-prefix scaling rungs only test scale, not architecture). All Phase-2
+claims should be scoped to "DeepSeek-V2/V3-style MLA" explicitly when
+written up — generalisation to V4/Qwen3-Next/KDA is conjectural until
+those architectures are independently exercised.
 
 ### d.7.2 Localisation rules added to d.2
 

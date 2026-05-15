@@ -2,8 +2,10 @@
 
 Validates:
   - MultiLatentAttention produces well-shaped logits.
-  - classify_parameters picks up (W_UK, W_DKV), (W_UV, W_DKV), (W_UQ, W_DQ)
-    as coupled pairs with the shared-DKV-partner contract.
+  - classify_parameters picks up (W_UK, W_DKV) as the K-side coupled pair
+    and (W_UQ, W_DQ) as the Q-side pair (when q_lora_rank > 0). W_UV
+    routes to plain Muon because CoupledMuon_v2's per-step `processed`
+    set rules out two coupled pairs sharing a B-partner.
   - mla_kr_proj falls through to plain Muon (no factored partner).
 """
 from __future__ import annotations

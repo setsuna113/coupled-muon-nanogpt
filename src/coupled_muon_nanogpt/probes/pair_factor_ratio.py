@@ -9,7 +9,12 @@ to log ‖W_A‖_F / ‖W_B‖_F per coupled pair over training and check whethe
 ratio stays bounded or drifts.
 
 Zero compute cost (two ``.norm()`` calls per pair). Registered in train.py
-when ``train.probes.pair_factor_ratio_interval_tokens > 0``.
+when ``train.probes.pair_factor_ratio_interval_tokens > 0``. The probe must
+mirror the *live* optimizer's coupling flags so it only reports pairs the
+optimizer actually couples — train.py threads `couple_qk`, `couple_vo`,
+`couple_updown`, `couple_mla`, `couple_factff`, `couple_router_to_muon`
+through `ctx`. When the keys are absent (e.g., direct test invocation) the
+probe falls back to `classify_parameters`'s defaults.
 """
 from __future__ import annotations
 
@@ -29,7 +34,17 @@ def pair_factor_ratio_probe(
 ) -> dict[str, Any]:
     n_heads = int(ctx.get("n_heads", 1))
     n_kv_heads = int(ctx.get("n_kv_heads", n_heads))
-    groups = classify_parameters(model, n_heads=n_heads, n_kv_heads=n_kv_heads)
+    groups = classify_parameters(
+        model,
+        couple_qk=bool(ctx.get("couple_qk", True)),
+        couple_vo=bool(ctx.get("couple_vo", True)),
+        couple_updown=bool(ctx.get("couple_updown", True)),
+        couple_mla=bool(ctx.get("couple_mla", True)),
+        couple_factff=bool(ctx.get("couple_factff", True)),
+        n_heads=n_heads,
+        n_kv_heads=n_kv_heads,
+        couple_router_to_muon=bool(ctx.get("couple_router_to_muon", True)),
+    )
     out: dict[str, Any] = {}
 
     def report(prefix: str, idx: int, A: torch.Tensor, B: torch.Tensor) -> None:

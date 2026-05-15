@@ -42,9 +42,11 @@ _PROJ_NAMES = (
     "q_proj", "k_proj", "v_proj", "o_proj",
     "up_proj", "down_proj", "gate_proj",
     # Phase-2 MLA projections (factored attention; suggestion.md S2 / §2.4).
-    # Pair convention: (W_UK, W_DKV) and (W_UV, W_DKV) for KV down-up;
-    # (W_UQ, W_DQ) for the optional low-rank Q. `mla_kr_proj` (the always-
-    # RoPE'd K side) has no factored partner — routed to plain Muon.
+    # Pair convention: (W_UK, W_DKV) for the K-side coupled pair and
+    # (W_UQ, W_DQ) for the optional low-rank Q. W_UV cannot be a second
+    # coupled partner of W_DKV (CoupledMuon_v2's per-step `processed`
+    # set rules it out) and routes to plain Muon. `mla_kr_proj` (the
+    # always-RoPE'd K side) also routes to plain Muon (no factored partner).
     "mla_dkv_proj", "mla_uk_proj", "mla_uv_proj", "mla_kr_proj",
     "mla_dq_proj", "mla_uq_proj",
     # Phase-2 imposed-FFN-factorisation (Tier B3 / §245).
@@ -58,9 +60,12 @@ class ParamGroups:
     coupled_vo: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
     coupled_updown: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
     # Phase-2 factored-architecture pairs (MLA KV/Q + imposed-factored FFN).
-    # The MLA W_DKV param appears as B-partner in BOTH (UK,DKV) and (UV,DKV);
-    # CoupledMuon_v2 keys per-pair state by `id(param)`, so DKV accumulates
-    # the union of UK-side and UV-side updates each step.
+    # Only the K-side (W_UK, W_DKV) is a coupled pair; W_UV routes to plain
+    # Muon because `CoupledMuon_v2.step`'s `processed` set rules out two
+    # coupled pairs sharing a B-partner (the second would silently no-op).
+    # DKV therefore receives one coupled-MLA-KV update per step (paired with
+    # UK) plus its own plain-Muon update — not "the union of UK- and UV-side
+    # updates". See `model/attention.py` MLA docstring + experiment.md d.7.6.
     coupled_mla_kv: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
     coupled_mla_q: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
     coupled_factff: list[tuple[nn.Parameter, nn.Parameter, int]] = field(default_factory=list)
@@ -130,7 +135,10 @@ def classify_parameters(
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        # Routers: AdamW by default (c.3); if rung J's flag is set, route to Muon.
+        # Routers: Muon by default (`couple_router_to_muon=True`, matching
+        # Moonlight 2502.16982 §2.2 and Cerebras nanoMoE). Setting the flag
+        # to False routes routers to AdamW (rung J ablation, DeepSeek-V2/V3
+        # and OLMoE convention).
         if "router" in name or "gate_router" in name:
             if couple_router_to_muon and param.ndim == 2:
                 groups.muon_2d.append(param)
@@ -285,6 +293,7 @@ def build_optimizer(
             lr=float(opt.lr),
             wd=wd,
             momentum=float(opt.momentum),
+            nesterov=bool(opt.get("nesterov", True)),
             ns_steps=int(opt.ns_steps),
             adamw_betas=tuple(opt.betas),
             adamw_eps=float(opt.eps),
@@ -358,7 +367,7 @@ def build_optimizer(
             muon_params=list(groups.muon_2d),
             adamw_params=list(groups.adamw_other) + list(groups.router_params),
             momentum=float(opt.momentum),
-            nesterov=True,
+            nesterov=bool(opt.get("nesterov", True)),
             ns_steps=int(opt.ns_steps),
             coupled_steps=int(opt.coupled_steps),
             adamw_betas=tuple(opt.betas),

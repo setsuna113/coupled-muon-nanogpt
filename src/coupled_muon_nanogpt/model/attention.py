@@ -139,12 +139,18 @@ class MultiLatentAttention(nn.Module):
 
     Pair convention (read by ``optim.factory.classify_parameters``):
 
-      - (W_UK,   W_DKV) — coupled_mla_kv
-      - (W_UV,   W_DKV) — coupled_mla_kv  (DKV is the shared B-partner)
+      - (W_UK,   W_DKV) — coupled_mla_kv  (the K-side factored pair)
       - (W_UQ,   W_DQ)  — coupled_mla_q   (only when q_lora_rank > 0)
 
+    ``W_UV`` is **not** in a coupled pair: ``CoupledMuon_v2.step``'s per-step
+    ``processed`` set rules out two coupled pairs sharing a B-partner
+    (otherwise the second would silently no-op and UV would never update).
+    The K-side is the structural analogue of LoRA's (B, A) for the K matrix,
+    so we couple (W_UK, W_DKV) and route ``W_UV`` through plain Muon. A 3-way
+    (UK, UV, DKV) joint coupling kernel is Phase-2.5 work.
+
     All other 2D MLA projections (``W_KR``, ``q_proj`` when q_lora_rank == 0,
-    ``o_proj``) flow into plain Muon. The total per-head QK channel count is
+    ``W_UV``, ``o_proj``) flow into plain Muon. The total per-head QK channel count is
     ``qk_nope_head_dim + qk_rope_head_dim``; per-head V channel count is
     ``v_head_dim``. The output projection ``o_proj`` maps
     ``(n_heads * v_head_dim) → hidden`` (V head-dim can differ from QK).

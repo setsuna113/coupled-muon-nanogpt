@@ -1,10 +1,16 @@
 # Ladder rung O_mla — Phase-2 MLA rung at 60M-CS (suggestion.md S2 / §2.4).
 # I's SwiGLU MoE backbone (hidden=512, n_layers=8, n_heads=8, every-other MoE,
 # 8 experts top-2) with attention replaced by DeepSeek-V2/V3-style MLA. The
-# headline novel architecture for Phase 2:
-#   - KV down-up factored pair (W_DKV, W_UK), (W_DKV, W_UV) — natively factored
-#   - Optional low-rank Q (W_DQ, W_UQ) when q_lora_rank > 0 — natively factored
-# CoupledMuon couples all three pairs via `coupled_mla_kv` / `coupled_mla_q`.
+# rung compares as I → O_mla (MoE backbone fixed; attention swapped from MHA
+# to MLA). The headline novel architecture for Phase 2:
+#   - K-side factored pair (W_UK, W_DKV) — coupled via `coupled_mla_kv`
+#   - Optional low-rank Q (W_UQ, W_DQ) when q_lora_rank > 0 — coupled via
+#     `coupled_mla_q`
+# W_UV routes to plain Muon: `CoupledMuon_v2.step`'s `processed` set rules
+# out two coupled pairs sharing a B-partner, so we pick the K-side as the
+# coupled partner of DKV (the LoRA-(B,A) analogue for the K matrix) and a
+# 3-way (UK, UV, DKV) joint kernel is Phase-2.5 work. See experiment.md
+# d.7.6 (UV scoping note) + model/attention.py MLA docstring.
 # `use_multi_head=false` — MLA's split nope/rope per-head layout doesn't fit
 # the multi-head Q-K reshape path; flat-2D coupling is the correct route.
 name: ladder_O_mla
