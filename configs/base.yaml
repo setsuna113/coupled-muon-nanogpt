@@ -75,15 +75,24 @@ optimizer:
   lr: 3.0e-3                    # for muon-family; AdamW configs override
   wd: 0.1                       # base value; with `wd_per_width: true` it is
                                 # divided by hidden at apply time per d.3 +
-                                # Bergsma 2025 ("0.1/width independent wd").
+                                # Qiu et al. 2025 (arXiv 2512.05620, "Hyperparameter
+                                # Transfer Enables Consistent Gains of Matrix-
+                                # Preconditioned Optimizers Across Scales") §3.4:
+                                # "scaling the independent weight decay as
+                                # 1/width is near-optimal across optimizers".
   wd_per_width: true            # d.3 protocol — applies to all optimizers.
   momentum: 0.95
-  nesterov: true                # Moonlight 2502.16982 §2 default. Set false
+  nesterov: true                # Moonlight 2502.16982 default. Set false
                                 # for suggestion.md §B5 momentum/Nesterov
                                 # confirmation cell; honored by both Muon and
                                 # CoupledMuon_v2 builders.
-  betas: [0.95, 0.95]           # AdamW β₁=0.95, β₂=0.95 per experiment.md d.3
-                                # (Essential AI 2505.02222). Pre-fix had 0.9/0.95.
+  betas: [0.95, 0.95]           # AdamW β₁=0.95, β₂=0.95 per experiment.md d.3.
+                                # Empirical default informed by the Essential AI
+                                # "Practical Efficiency of Muon for Pretraining"
+                                # study (arXiv 2505.02222); the paper's abstract
+                                # focuses on the Muon-vs-AdamW compute frontier
+                                # rather than naming β₁/β₂, so treat the cite as
+                                # supportive context, not direct prescription.
   eps: 1.0e-8
   ns_steps: 5
   coupled_steps: 4              # 0 ⇒ plain Muon path inside CoupledMuon_v2
@@ -97,7 +106,7 @@ optimizer:
   # ablation (experiment.md a.2 / d.4). Toggle to localize whether the trailing
   # NS pass is doing real work or is approximately a no-op.
   final_polish: true
-  # Router optimizer: True (default, matches Moonlight 2502.16982 §2.2 and
+  # Router optimizer: True (default, matches Moonlight 2502.16982 §3.4 and
   # Cerebras nanoMoE) routes MoE routers through Muon. False → AdamW (rung J
   # ablation, DeepSeek-V2/V3/OLMoE-style). See experiment.md c.3.
   couple_router_to_muon: true

@@ -135,10 +135,11 @@ def classify_parameters(
     embedding or LM head (those run AdamW).
 
     `couple_router_to_muon`: if True (default, per experiment.md c.3 — matches
-    Moonlight 2502.16982 §2.2 and Cerebras nanoMoE, both of which put MoE
-    router weights under Muon), MoE router weights flow into the plain Muon
-    path. If False, routers go to AdamW (rung J ablation; DeepSeek-V2/V3-
-    and OLMoE-style).
+    Moonlight 2502.16982 §3.4 ("Dynamics of Singular Spectrum"), which
+    observes routers benefit more from Muon than other matrices, and
+    Cerebras nanoMoE which puts MoE router weights under Muon by default),
+    MoE router weights flow into the plain Muon path. If False, routers go
+    to AdamW (rung J ablation; DeepSeek-V2/V3- and OLMoE-style).
     """
     groups = ParamGroups()
     n_kv = n_kv_heads or n_heads
@@ -150,7 +151,7 @@ def classify_parameters(
         if not param.requires_grad:
             continue
         # Routers: Muon by default (`couple_router_to_muon=True`, matching
-        # Moonlight 2502.16982 §2.2 and Cerebras nanoMoE). Setting the flag
+        # Moonlight 2502.16982 §3.4 and Cerebras nanoMoE). Setting the flag
         # to False routes routers to AdamW (rung J ablation, DeepSeek-V2/V3
         # and OLMoE convention).
         if "router" in name or "gate_router" in name:
@@ -269,10 +270,14 @@ def build_optimizer(
     n_heads = int(cfg.model.attn.n_heads)
     n_kv_heads = int(cfg.model.attn.get("n_kv_heads", n_heads) or n_heads)
 
-    # Per experiment.md d.3 + Bergsma 2025 (arXiv 2512.05620): "Combining μP with
-    # 1/width independent weight decay, Muon and Shampoo achieve consistent 1.4×
-    # and 1.3× speedups". When wd_per_width is true, divide the configured wd
-    # by hidden width before passing to the optimizer.
+    # Per experiment.md d.3 + Qiu, Chen, Phan, Lei, Wilson (arXiv 2512.05620,
+    # "Hyperparameter Transfer Enables Consistent Gains of Matrix-Preconditioned
+    # Optimizers Across Scales"): "scaling the independent weight decay as
+    # 1/width is near-optimal across optimizers" (§3.4); the paper reports
+    # Muon, SOAP, and Shampoo consistently achieve ~1.4× speedup over AdamW
+    # when this transfer rule is applied (190M–1.4B Llama-architecture). When
+    # wd_per_width is true, divide the configured wd by hidden width before
+    # passing to the optimizer.
     hidden = int(cfg.model.hidden)
     wd_raw = float(opt.wd)
     wd = wd_raw / hidden if bool(opt.get("wd_per_width", False)) else wd_raw

@@ -38,7 +38,7 @@ optimizer:
   coupled_steps: 4
   ns_steps: 5
   use_multi_head: true
-  couple_router_to_muon: true   # default; matches Moonlight 2502.16982 §2.2.
+  couple_router_to_muon: true   # default; matches Moonlight 2502.16982 §3.4.
                                 # Rung J flips this to false (AdamW-router ablation).
 
 train:

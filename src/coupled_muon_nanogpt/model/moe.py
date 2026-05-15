@@ -3,9 +3,10 @@
 This is a clean, didactic MoE implementation — not a fused-kernel speed-runner.
 The router parameter is named `gate_router` so the optimizer factory's
 "router" filter (`optim/factory.py`) routes it to Muon by default
-(matching Moonlight 2502.16982 §2.2 and Cerebras nanoMoE). Setting
-`optimizer.couple_router_to_muon: false` flips it to AdamW (rung J's
-DeepSeek-V2/V3 / OLMoE ablation). The expert MLP matrices follow the same
+(matching Moonlight 2502.16982 §3.4 "Dynamics of Singular Spectrum" —
+which observes routers benefit more from Muon than other matrices — and
+Cerebras nanoMoE). Setting `optimizer.couple_router_to_muon: false` flips
+it to AdamW (rung J's DeepSeek-V2/V3 / OLMoE ablation). The expert MLP matrices follow the same
 `up_proj` / `down_proj` (and optional `gate_proj`) naming so the factory's
 pair detection works on them too.
 

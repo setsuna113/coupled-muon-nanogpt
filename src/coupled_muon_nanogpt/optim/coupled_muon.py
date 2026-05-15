@@ -376,11 +376,19 @@ class CoupledMuon_v2(torch.optim.Optimizer):
 
     def adjust_lr_for_muon(self, lr, param_shape):
         """Per-parameter LR scaling. The default (`moonlight`) matches Phase-1's
-        ``0.2·√max(A,B)`` (Moonlight Lemma 1). Phase-2 adds two alternatives:
+        ``0.2·√max(A,B)`` (Moonlight 2502.16982 §2.2 Eq. 4 —
+        ``W_t = W_{t-1} − η_t (0.2·O_t·√max(A,B) + λW_{t-1})``). Phase-2 adds
+        two alternatives:
 
-        - ``bernstein_ratio``: ``0.2·√(d_out/d_in)`` (Bernstein–Newhouse 2024;
-          Cesista per-row normalisation argument).
-        - ``cesista``: ``0.2·√max(A,B) / (1 + log(K+1))`` — per-step normalised.
+        - ``bernstein_ratio``: ``0.2·√(d_out/d_in)`` — Jeremy Bernstein,
+          "Deriving Muon" (https://jeremybernste.in/writing/deriving-muon)
+          defines ``W ← W − η·√(fan-out/fan-in)·NewtonSchulz(∇)``; we keep
+          Moonlight's ``0.2`` RMS-matching factor on top of Bernstein's
+          dimensional ratio.
+        - ``cesista``: ``0.2·√max(A,B) / (1 + log(K+1))`` — **project-local
+          heuristic, not from any Cesista publication**. Cesista's work
+          optimises NS *coefficients* per step (see ``ns_coefficients.py``),
+          not the outer LR prefactor. Name retained for sweep compatibility.
         """
         A, B = param_shape[:2]
         policy = self.lr_prefactor

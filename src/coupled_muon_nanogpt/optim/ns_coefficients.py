@@ -1,42 +1,51 @@
 """Newton-Schulz coefficient policies for Phase-2 NS-policy sweep.
 
-Three policies are supported:
+Three policies are supported. All numeric tables below are taken **verbatim**
+from canonical published / reference-implementation sources (see the
+PROVENANCE comments next to each table). When the user-requested K is at or
+below a table's published length, we take the first K entries; for K greater
+than the published length we extend by repeating the final (near-converged)
+step. ``coeffs=None`` paths in the optimizer kernels fall through to the
+hardcoded Bernstein triple, preserving Phase-1 numerics bitwise.
 
-- ``bernstein``  — K copies of the canonical quintic ``(3.4445, -4.7750, 2.0315)``
-  (Keller Jordan 2024; the Phase-1 default). Coefficients are deliberately
-  *non-convergent* — optimized for steep slope at the origin (inflating small
-  singular values fast) at the cost of error plateauing at ≈ 0.3
-  (Modula docs; Polar Express §2). ``coeffs=None`` paths in the optimizer
-  kernels fall through to this exact triple, preserving Phase-1 numerics
-  bitwise.
+- ``bernstein``  — K copies of the canonical quintic ``(3.4445, -4.7750, 2.0315)``.
+  Verified from Keller Jordan's Muon blog and from NVIDIA's
+  ``emerging-optimizers`` library's ``"simple"`` entry. The coefficients are
+  deliberately *non-convergent* — optimised for steep slope at the origin
+  (inflating small singular values fast) at the cost of error plateauing
+  at ≈ 0.3 (Modula docs; Polar Express §2).
 
-- ``polar_express`` — per-step degree-5 coefficients from Amsel, Persson, Musco
-  & Gower, "The Polar Express" (arXiv 2505.16932, ICLR 2026). Drive the polar
-  iterate to ≈ 1 ≈ 2× faster at the spectral floor than Bernstein. **Values
-  below are approximate reproductions** of the published optimal per-step
-  coefficients; the canonical values live in the paper's supplement and the
-  NVIDIA ``emerging-optimizers`` reference implementation. Replace with the
-  exact values before the headline publication run.
+- ``polar_express`` — Amsel, Persson, Musco & Gower, "The Polar Express:
+  Optimal Matrix Sign Methods and Their Application to the Muon Algorithm"
+  (arXiv 2505.16932v3, ICLR 2026). Per-step degree-5 polynomial whose
+  coefficients are computed by Algorithm 2 of the paper (Remez-based
+  minimax). The canonical 8-step table is shipped by NVIDIA's
+  ``emerging-optimizers/muon_utils.py`` (``_COEFFICIENT_SETS["polar_express"]``).
+  For K ≤ 8 we use the first K rows; for K > 8 we repeat the last (near-1)
+  triple to extend.
 
-- ``cesista`` — per-step optimised coefficients from Cesista, YouJiacheng &
-  Jordan, "Squeezing 1–2% efficiency gains" (2025). The first step uses the
-  Bernstein triple; subsequent steps narrow toward σ ≈ 1. Values below are
-  **also approximate**; the canonical sequence comes from the YouJiacheng
-  blog post and the same NVIDIA reference. Pulled in placeholder values that
-  match the spirit of the publication: a steep first step, then progressively
-  conservative refinement.
-
-The intent is that the *framework* (per-step coefficient selection, tensorised
-coefficient passing) lands here, and the numeric tables can be patched once
-the canonical sources are read. Tests for this module assert the framework
-behaviour (length K, finite, in a reasonable range), not the specific values.
+- ``cesista`` — Cesista, YouJiacheng & Jordan, "Squeezing 1-2% efficiency
+  gains in Muon via per-step Newton-Schulz coefficient gradient descent"
+  (https://leloykun.github.io/ponder/muon-opt-coeffs/). The published artifact
+  of this work is the per-step "quintic" 5-step table shipped by NVIDIA's
+  ``emerging-optimizers/muon_utils.py`` (``_COEFFICIENT_SETS["quintic"]``).
+  For K ≤ 5 we use the first K rows; for K > 5 we extend by repeating the
+  last (near-converged) triple. This extension is approximate — the proper
+  Cesista approach is to gradient-descent fresh coefficients per K — but
+  repeating the converged step keeps σ near 1 and avoids divergence, which
+  is the property the S1 sweep actually relies on.
 
 References:
-  - Amsel, Persson, Musco, Gower. "The Polar Express." arXiv 2505.16932.
-  - Cesista, YouJiacheng, Jordan. "Squeezing 1–2% efficiency gains in Muon
-    via per-step Newton–Schulz coefficient gradient descent." 2025.
+  - Amsel, Persson, Musco, Gower. "The Polar Express." arXiv 2505.16932v3
+    (ICLR 2026). https://arxiv.org/abs/2505.16932
+  - Cesista, Jordan. "Squeezing 1-2% Efficiency Gains Out of Muon by
+    Optimizing the Newton-Schulz Coefficients."
+    https://leloykun.github.io/ponder/muon-opt-coeffs/
+  - NVIDIA NeMo Emerging-Optimizers, ``muon_utils._COEFFICIENT_SETS``.
+    https://github.com/NVIDIA-NeMo/Emerging-Optimizers (canonical numeric source)
+  - Keller Jordan. "Muon: An optimizer for hidden layers in neural networks."
+    https://kellerjordan.github.io/posts/muon/ (Bernstein triple verification)
   - Bernstein & Newhouse. "Old Optimizer, New Norm" arXiv 2409.20325 (2024).
-  - Keller Jordan. Muon repo, ``muon.py``.
 """
 from __future__ import annotations
 
@@ -46,61 +55,63 @@ import torch
 _BERNSTEIN_TRIPLE: tuple[float, float, float] = (3.4445, -4.7750, 2.0315)
 
 
-# Per-step Polar Express coefficients (approximate; see module docstring).
-# Each row is (a_k, b_k, c_k) for k = 1, ..., K. Step 1 has the largest slope
-# (drives σ_min → 1 aggressively); later steps narrow.
+# Canonical Polar Express 8-step table — verbatim from
+# NVIDIA-NeMo/Emerging-Optimizers, muon_utils.py, _COEFFICIENT_SETS["polar_express"].
+# Step 1 has the largest slope at the origin (drives σ_min → 1); subsequent
+# steps narrow until the final step settles at ≈ (15/8, -10/8, 3/8) — the
+# polynomial that maps σ ≈ 1 → 1.
+_POLAR_EXPRESS_CANONICAL: list[tuple[float, float, float]] = [
+    (8.2051, -22.9019, 16.4607),
+    (4.0664,  -2.8612,  0.5184),
+    (3.9096,  -2.8234,  0.5250),
+    (3.2856,  -2.4153,  0.4853),
+    (2.2779,  -1.6198,  0.3985),
+    (1.8726,  -1.2307,  0.3585),
+    (1.8564,  -1.2132,  0.3568),
+    (1.8750,  -1.2500,  0.3750),
+]
+
+
+# Canonical Cesista 5-step table — verbatim from NVIDIA-NeMo/Emerging-Optimizers
+# muon_utils.py _COEFFICIENT_SETS["quintic"]. Derived by gradient-descent on
+# the per-step coefficient tensor (YouJiacheng / Cesista / Jordan, 2024-25)
+# to maximise slope at zero subject to a tolerance margin around σ = 1.
+_CESISTA_CANONICAL: list[tuple[float, float, float]] = [
+    (4.0848, -6.8946, 2.9270),
+    (3.9505, -6.3029, 2.6377),
+    (3.7418, -5.5913, 2.3037),
+    (2.8769, -3.1427, 1.2046),
+    (2.8366, -3.0525, 1.2012),
+]
+
+
+def _truncate_or_extend(
+    table: list[tuple[float, float, float]],
+    steps: int,
+) -> list[tuple[float, float, float]]:
+    """Return `steps` coefficients from a canonical table.
+
+    K ≤ len(table): first K rows.
+    K > len(table):  full table + repeat the last (near-converged) row.
+    """
+    if steps <= len(table):
+        return list(table[:steps])
+    pad = [table[-1]] * (steps - len(table))
+    return list(table) + pad
+
+
+# Pre-materialise the K-indexed view used by the existing get_coefficients() API.
+# Keys cover the S1 sweep's K ∈ {3, 5, 8} plus the K-curve sweep's
+# {1, 2, 3, 5, 8, 12} (suggestion.md S3 / configs/sweeps/k_curve_at_winner.yaml).
+_K_VALUES_OF_INTEREST: tuple[int, ...] = (1, 2, 3, 5, 8, 12)
+
 _POLAR_EXPRESS: dict[int, list[tuple[float, float, float]]] = {
-    3: [
-        (8.205, -23.475, 17.341),
-        (4.115, -2.945, 0.547),
-        (3.318, -2.489, 0.510),
-    ],
-    5: [
-        (8.205, -23.475, 17.341),
-        (4.115, -2.945, 0.547),
-        (3.949, -2.909, 0.554),
-        (3.318, -2.489, 0.510),
-        (2.300, -1.669, 0.419),
-    ],
-    8: [
-        (8.205, -23.475, 17.341),
-        (4.115, -2.945, 0.547),
-        (3.949, -2.909, 0.554),
-        (3.318, -2.489, 0.510),
-        (2.300, -1.669, 0.419),
-        (2.005, -1.428, 0.395),
-        (1.799, -1.252, 0.380),
-        (1.605, -1.105, 0.366),
-    ],
+    K: _truncate_or_extend(_POLAR_EXPRESS_CANONICAL, K)
+    for K in _K_VALUES_OF_INTEREST
 }
 
-
-# Per-step Cesista–YouJiacheng coefficients (approximate; see module docstring).
-# Step 1 = Bernstein triple (steep slope at the origin); subsequent steps are
-# slight refinements that improve the σ ≈ 1 plateau.
 _CESISTA: dict[int, list[tuple[float, float, float]]] = {
-    3: [
-        _BERNSTEIN_TRIPLE,
-        (3.3000, -4.5000, 1.9000),
-        (3.1000, -4.0000, 1.7000),
-    ],
-    5: [
-        _BERNSTEIN_TRIPLE,
-        (3.4000, -4.5000, 1.9500),
-        (3.3000, -4.2500, 1.8800),
-        (3.1500, -4.0000, 1.7500),
-        (2.9000, -3.5000, 1.5500),
-    ],
-    8: [
-        _BERNSTEIN_TRIPLE,
-        (3.4000, -4.5000, 1.9500),
-        (3.3500, -4.4000, 1.9000),
-        (3.2500, -4.2000, 1.8500),
-        (3.1500, -4.0000, 1.7500),
-        (3.0000, -3.7500, 1.6500),
-        (2.8500, -3.4000, 1.5000),
-        (2.6500, -3.1000, 1.4000),
-    ],
+    K: _truncate_or_extend(_CESISTA_CANONICAL, K) for K in _K_VALUES_OF_INTEREST
 }
 
 
