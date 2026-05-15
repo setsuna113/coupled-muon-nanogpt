@@ -80,8 +80,22 @@ def _layer_idx(name: str) -> str | None:
 
 
 def _proj_role(name: str) -> str | None:
+    """Identify the projection role for a parameter, anchored to dot-bounded
+    path components.
+
+    The MHA roles (``q_proj``, ``k_proj``, ``v_proj``, ``up_proj``, ``down_proj``)
+    are substrings of the MLA / FactFF roles (``mla_dkv_proj`` contains
+    ``v_proj``; ``mla_uk_proj`` contains ``k_proj``; ``factff_up_proj``
+    contains ``up_proj``; etc.). An unanchored ``role in name`` test
+    silently misclassifies every MLA/FactFF projection as a regular MHA
+    role, which then forms shape-mismatched Q-K / V-O coupled pairs that
+    crash the NS kernel. Anchor the match to the dot-bounded path
+    component (``.<role>.``) so ``.v_proj.`` only matches a real ``v_proj``
+    parameter, never the inside of ``mla_dkv_proj``.
+    """
+    s = "." + name
     for role in _PROJ_NAMES:
-        if role in name:
+        if f".{role}." in s:
             return role
     return None
 
