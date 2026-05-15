@@ -1,6 +1,6 @@
 \section{\S d.4 ablations (preliminary)}\label{app:d4}
 
-The \S d.4 ablation suite isolates which mechanical knob of \optCoupled{} carries the dense-LLaMA-60M gain. All cells run on A0 (SwiGLU + RoPE + RMSNorm), $1.2$\,B tokens, single-seed wide / multi-seed narrow per ablation. At report time 104 of the 105 planned cells have synced to wandb project \code{coupled-muon-ablation}; the figures below should be regenerated once the final cell lands (see Appendix~\ref{app:repro} for the refresh command).
+The \S d.4 ablation suite isolates which mechanical knob of \optCoupled{} carries the dense-LLaMA-60M gain. All cells run on A0 (SwiGLU + RoPE + RMSNorm), $1.2$\,B tokens, single-seed wide / multi-seed narrow per ablation. At report time all planned cells have synced (106 in wandb project \code{coupled-muon-ablation}, one cell past the originally planned 105 because of a single re-run of a transiently-failed slot).
 
 \subsection{Effect of inner NS depth (\code{coupled\_steps})}
 

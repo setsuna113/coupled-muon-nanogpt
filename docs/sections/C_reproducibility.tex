@@ -20,7 +20,7 @@ latexmk -pdf -outdir=docs/build docs/report.tex
 \end{verbatim}
 
 \paragraph{Sync state at the time of this snapshot.}
-The data described above is a snapshot. Stage~1 has 73 of 75 expected cells synced (the two missing are \optMuon{} at $(\mathrm{lr},\,\mathrm{seed})\in\{(10^{-3}, 3),\,(3\!\cdot\!10^{-2}, 2)\}$, the latter of which would have diverged regardless of the missing seed). Stage~2 is fully synced at 270/270 cells. The \S d.4 ablation project has 104 of an expected 105 cells. None of the missing cells changes the qualitative reading of Fig.~\ref{fig:xstage-forest}; when the remaining cells sync, refresh the parquet via \code{fetch\_all.py --refresh} and re-run \code{make\_all.py}.
+The data described above is the report-time snapshot. Stage~1 is fully synced at 75/75 expected cells. Stage~2 is fully synced at 270/270 cells (88 diverged, 182 converged). The \S d.4 ablation project has 106 synced cells (one cell past the originally planned 105 — the extra cell is a re-run of a transiently-failed slot, identical configuration). When additional cells arrive, refresh the parquet via \code{fetch\_all.py --refresh} and re-run \code{make\_all.py}; the entire report is driven from these snapshots.
 
 \paragraph{Data lineage in the codebase.}
 The per-cell numeric source of truth is \code{<results-dir>/<run\_id>/metrics.jsonl}; the wandb cloud copy is a synced mirror. Provenance for which sweep produced which cell:
