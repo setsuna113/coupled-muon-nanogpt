@@ -80,8 +80,8 @@ Phase 2 adds three new lanes of cells across the three idle rigs. The headline g
 | Rig | Sweeps (run in order) | Cells | Wandb project(s) | Results dir |
 |---|---|---|---|---|
 | **R_abl — 2×H200** | `ns_coeff_K_sweep` (S1, 36) → `k_curve_at_winner` (S3, 18) → `lr_prefactor_ablation` (A2, 16) → `imposed_factff` (B3, 12) | 82 | `coupled-muon-ns-policy`, `coupled-muon-k-curve`, `coupled-muon-lr-prefactor`, `coupled-muon-imposed-factff` | `$GLOBAL/phase2-rigC-{ns-policy,k-curve,lr-prefactor,imposed-factff}/` |
-| **R_prod — 4×H200** | `mla_lr_grid` (S2, 45) → `pair_policy_{attn_only,ffn_only,all}` (A1, 15) → `adamw_equalization_I` (A3.I, 10) → `mla_scaling_350m` (stretch, 30 — conditional) | 100 | `coupled-muon-mla`, `coupled-muon-pair-policy`, `coupled-muon-moe-anchor-adamw`, `coupled-muon-mla-350m` | `$GLOBAL/phase2-rigA-{mla,pair-policy,adamw-I,mla-350m}/` |
-| **R_screen — 8×H100** | `adamw_equalization_I_prime` (A3.I', 10) → `lora_rank_sweep` (B1, 15) | 25 | `coupled-muon-moe-anchor-adamw-Iprime`, `coupled-muon-lora-rank` | `$GLOBAL/phase2-rigB-{adamw-Iprime,lora-rank}/` |
+| **R_prod — 4×H200** | `mla_lr_grid` (S2, 45) → `mla_scaling_350m` (stretch, 30 — conditional) | 75 (or 45 if stretch NO-GO) | `coupled-muon-mla`, `coupled-muon-mla-350m` | `$GLOBAL/phase2-rigA-{mla,mla-350m}/` |
+| **R_screen — 8×H100** | `adamw_equalization_I_prime` (A3.I', 10) → `lora_rank_sweep` (B1, 15) → `adamw_equalization_I` (A3.I, 10) → `pair_policy_{attn_only,ffn_only,all}` (A1, 15) | 50 | `coupled-muon-moe-anchor-adamw-Iprime`, `coupled-muon-lora-rank`, `coupled-muon-moe-anchor-adamw`, `coupled-muon-pair-policy` | `$GLOBAL/phase2-rigB-{adamw-Iprime,lora-rank,adamw-I,pair-policy}/` |
 
 ### Phase-2 timeline (T=0 = Phase-2 launch)
 
@@ -90,12 +90,13 @@ Phase 2 adds three new lanes of cells across the three idle rigs. The headline g
 | 0     | R_abl starts S1; R_prod starts S2 (Bernstein default — winner backfilled at T+1.5d); R_screen starts A3.I'. |
 | 0.25  | R_screen finishes A3.I'. Starts B1. |
 | 1.5   | R_abl finishes S1. **MILESTONE: NS-policy winner declared.** Re-emit S3/S2/A1/B1/stretch JSONLs with the winner's `optimizer.ns_coefficients` value. |
-| 2.15  | R_screen finishes B1. R_screen idle. |
+| 2.15  | R_screen finishes B1. Starts A3.I (reassigned from R_prod). |
 | 2.25  | R_abl finishes S3. Starts A2. |
+| 2.4   | R_screen finishes A3.I. Starts A1 (reassigned from R_prod). |
 | 2.92  | R_abl finishes A2. Starts B3. |
+| 3.4   | R_screen finishes A1. R_screen idle. |
 | 3.42  | R_abl finishes B3. R_abl idle. |
 | 5.6   | R_prod finishes S2. **MILESTONE: O_mla cross-optimizer triple done. 350M-stretch GO/NO-GO decision.** |
-| 7.5   | R_prod finishes A1 + A3.I (cumulative). |
 | ~15.3 | R_prod finishes 350M stretch (if commissioned; sequential 4-GPU DDP). All Phase 2 complete. |
 
 ### Phase-2 dependencies
