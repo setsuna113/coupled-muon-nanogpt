@@ -1,0 +1,124 @@
+{
+  "snapshot_utc": "2026-05-19T15:51:19+00:00",
+  "projects": [
+    {
+      "project": "coupled-muon-moe-pt1-prod",
+      "expected": 60,
+      "wandb_runs": 60,
+      "final_cells": 60,
+      "missing_final": 0,
+      "duplicates_discarded": 0,
+      "states": "finished:60"
+    },
+    {
+      "project": "coupled-muon-moe-pt2-screen",
+      "expected": 90,
+      "wandb_runs": 34,
+      "final_cells": 32,
+      "missing_final": 58,
+      "duplicates_discarded": 0,
+      "states": "crashed:1, finished:32, running:1"
+    },
+    {
+      "project": "coupled-muon-moe-anchor-adamw",
+      "expected": 25,
+      "wandb_runs": 24,
+      "final_cells": 15,
+      "missing_final": 10,
+      "duplicates_discarded": 9,
+      "states": "finished:24"
+    },
+    {
+      "project": "coupled-muon-moe-anchor-adamw-Iprime",
+      "expected": 25,
+      "wandb_runs": 25,
+      "final_cells": 25,
+      "missing_final": 0,
+      "duplicates_discarded": 0,
+      "states": "finished:25"
+    },
+    {
+      "project": "coupled-muon-ns-policy",
+      "expected": 36,
+      "wandb_runs": 36,
+      "final_cells": 33,
+      "missing_final": 3,
+      "duplicates_discarded": 0,
+      "states": "finished:36"
+    },
+    {
+      "project": "coupled-muon-k-curve",
+      "expected": 18,
+      "wandb_runs": 0,
+      "final_cells": 0,
+      "missing_final": 18,
+      "duplicates_discarded": 0,
+      "states": "none"
+    },
+    {
+      "project": "coupled-muon-lr-prefactor",
+      "expected": 18,
+      "wandb_runs": 0,
+      "final_cells": 0,
+      "missing_final": 18,
+      "duplicates_discarded": 0,
+      "states": "none"
+    },
+    {
+      "project": "coupled-muon-mla",
+      "expected": 45,
+      "wandb_runs": 0,
+      "final_cells": 0,
+      "missing_final": 45,
+      "duplicates_discarded": 0,
+      "states": "none"
+    },
+    {
+      "project": "coupled-muon-imposed-factff",
+      "expected": 12,
+      "wandb_runs": 0,
+      "final_cells": 0,
+      "missing_final": 12,
+      "duplicates_discarded": 0,
+      "states": "none"
+    },
+    {
+      "project": "coupled-muon-lora-rank",
+      "expected": 15,
+      "wandb_runs": 2,
+      "final_cells": 1,
+      "missing_final": 14,
+      "duplicates_discarded": 0,
+      "states": "finished:1, running:1"
+    },
+    {
+      "project": "coupled-muon-pair-policy",
+      "expected": 15,
+      "wandb_runs": 0,
+      "final_cells": 0,
+      "missing_final": 15,
+      "duplicates_discarded": 0,
+      "states": "none"
+    },
+    {
+      "project": "coupled-muon-mla-350m",
+      "expected": 30,
+      "wandb_runs": 0,
+      "final_cells": 0,
+      "missing_final": 30,
+      "duplicates_discarded": 0,
+      "states": "none"
+    }
+  ],
+  "fetch_errors": {
+    "coupled-muon-k-curve": "ValueError: Could not find project coupled-muon-k-curve",
+    "coupled-muon-lr-prefactor": "ValueError: Could not find project coupled-muon-lr-prefactor",
+    "coupled-muon-mla": "ValueError: Could not find project coupled-muon-mla",
+    "coupled-muon-imposed-factff": "ValueError: Could not find project coupled-muon-imposed-factff",
+    "coupled-muon-pair-policy": "ValueError: Could not find project coupled-muon-pair-policy",
+    "coupled-muon-mla-350m": "ValueError: Could not find project coupled-muon-mla-350m"
+  },
+  "missing_cells_csv": "docs/data/part2_missing_cells.csv",
+  "discarded_duplicates_csv": "docs/data/part2_discarded_duplicates.csv",
+  "dedupe_rule": "project/rung/optimizer/lr/seed plus active ablation axes; keep final non-null finished rows, prefer latest W&B timestamp"
+}

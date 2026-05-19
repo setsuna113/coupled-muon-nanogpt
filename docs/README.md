@@ -1,4 +1,4 @@
-# Stage 1 + Stage 2 report (LaTeX)
+# Stage 1 + Stage 2 report, plus Part II sparse-MoE report (LaTeX)
 
 Hand-built scientific report covering the Coupled Muon v2 dense-architecture
 ladder results. Audience: pre-training specialists; no Muon recap.
@@ -58,3 +58,23 @@ direction (brackets-zero status flips), update the corresponding sentence in
 `sections/04_stage2.tex` or `sections/05_synthesis.tex`. The build script
 prints a summary at the end of `tab05_xstage_diffs.py` ("Coupled-vs-Muon CI
 brackets zero on N/7 rungs") to make this easy to spot.
+
+## Part II sparse-MoE rebuild
+
+```
+uv run python docs/figures/fetch_part2.py --refresh --summary-only
+uv run python docs/figures/make_part2.py
+latexmk -pdf -outdir=docs/build docs/report_part2.tex
+```
+
+`fetch_part2.py` writes `docs/data/part2_manifest.json`,
+`docs/data/part2_summary*.parquet`, `docs/data/part2_completion.csv`,
+`docs/data/part2_missing_cells.csv`, and
+`docs/data/part2_discarded_duplicates.csv`. Missing future Phase-2 projects
+are recorded in the manifest and are not treated as CLI failures.
+
+History/probe curves are optional because W\&B `scan_history` is slow:
+
+```
+uv run python docs/figures/fetch_part2.py --with-history
+```

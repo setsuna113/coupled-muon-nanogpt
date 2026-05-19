@@ -2,6 +2,8 @@
 
 The \S d.4 ablation suite isolates which mechanical knob of \optCoupled{} carries the dense-LLaMA-60M gain. All cells run on A0 (SwiGLU + RoPE + RMSNorm), $1.2$\,B tokens, single-seed wide / multi-seed narrow per ablation. At report time all planned cells have synced (106 in wandb project \code{coupled-muon-ablation}, one cell past the originally planned 105 because of a single re-run of a transiently-failed slot).
 
+The broader Phase-2 defensive-ablation suite is not folded into this Part~I appendix. As of the Part~II W\&B snapshot, only the NS-policy grid is synced under the expected Phase-2 project names; K-curve, LR-prefactor, MLA, FactFF, pair-policy, and 350M MLA evidence are documented as missing/future Part~II cells. LoRA-rank has started, but only as one finished unpaired row plus one running row, so it is not absorbed into this dense appendix.
+
 \subsection{Effect of inner NS depth (\code{coupled\_steps})}
 
 \begin{figure}[h]
@@ -9,6 +11,8 @@ The \S d.4 ablation suite isolates which mechanical knob of \optCoupled{} carrie
 \figincl{figB1_coupled_steps}
 \caption{Final val loss at A0 as a function of $\code{coupled\_steps}\in\{0,1,2,4,8\}$ with full Q--K + V--O + up--down coupling and stage-2 polish on. \code{coupled\_steps=0} reduces to vanilla \optMuon. Reference horizontal band: \optMuon{} at $\mathrm{lr}{=}3\!\cdot\!10^{-3}$ on the same project, median $\pm$ 95\% CI.}\label{fig:d4-coupled-steps}
 \end{figure}
+
+The inner coupled pass does not need many iterations to recover the dense gain. At $\mathrm{lr}=3\!\cdot\!10^{-3}$, \code{coupled\_steps=0} sits on the \optMuon{} reference at $\approx 3.432\nats{}$. One or two coupled steps drop the median to $\approx 3.417\nats{}$, recovering most of the A0 improvement, while four and eight steps saturate near $\approx 3.414\nats{}$. The practical reading is that the partner-aware iterate is load-bearing, but the default \code{coupled\_steps=4} is already close to the flat part of the curve.
 
 \subsection{Stage-2 polish on/off}
 
@@ -18,13 +22,17 @@ The \S d.4 ablation suite isolates which mechanical knob of \optCoupled{} carrie
 \caption{Effect of the trailing plain-NS pass (\code{final\_polish}). Left: median final val loss with 95\% CI for \code{final\_polish=True} vs \code{False}. Right: if available, the post-stage-1 $\sigma_{\max}(X)$ probe trace (the diagnostic that decides whether stage~2 is doing real work or is approximately a no-op).}\label{fig:d4-final-polish}
 \end{figure}
 
+\code{final\_polish=False} is not a harmless speed shortcut once \code{coupled\_steps>0}. At \code{coupled\_steps=4}, $\mathrm{lr}=3\!\cdot\!10^{-3}$, and full pair coupling, the polished rows land near $\approx 3.414\nats{}$ with no divergence, whereas the unpolished rows have four diverged rerun rows and the surviving rows are around $\approx 3.557\nats{}$. Even at $\mathrm{lr}=10^{-3}$, where the unpolished configuration does not diverge, it is still about $0.03\nats{}$ worse than the polished counterpart. Stage~2 polish is therefore load-bearing for stability and final loss.
+
 \subsection{Per-pair ablation}
 
 \begin{figure}[h]
 \centering
 \figincl{figB3_per_pair}
-\caption{Which of the three coupling pairs carries the A0 gain: turn off Q--K, V--O, or up--down in isolation. Bars are median final val loss with 95\% CI over converged seeds; reference dashed line is plain \optMuon{} at the same LR.}\label{fig:d4-per-pair}
+\caption{Full pair-factorial ablation over Q--K, V--O, and up--down coupling. Bars are median final val loss with 95\% CI over converged seeds; reference dashed line is plain \optMuon{} at the same LR.}\label{fig:d4-per-pair}
 \end{figure}
+
+The full factorial readout localises most of the dense gain to attention-side coupling. With all pairs disabled, the row is indistinguishable from \optMuon{} ($\approx 3.432\nats{}$). Q--K alone and V--O alone each recover roughly $0.010\nats{}$; up--down alone recovers only $\approx 0.003\nats{}$. Pair combinations are additive but not perfectly so: Q--K+V--O reaches $\approx 3.417\nats{}$, adding up--down to either attention pair improves by another few millinats, and all three pairs reach the best $\approx 3.414\nats{}$ row. The MLP pair is weak alone, but it still helps in combination.
 
 \subsection{Two-way: \code{coupled\_steps} $\times$ \code{final\_polish}}
 
@@ -41,3 +49,5 @@ The \S d.4 ablation suite isolates which mechanical knob of \optCoupled{} carrie
 \figincl{figB5_ns_budget}
 \caption{Does extra NS budget alone (giving \optMuon{} a larger \code{ns\_steps}) match \optCoupled{}'s gain? If yes, the coupled gain is partly a ``more NS depth'' artefact; if no, the partner-aware iterate is the load-bearing piece.}\label{fig:d4-ns-budget}
 \end{figure}
+
+The Muon NS-budget control rules out the simplest compute-budget explanation. At $\mathrm{lr}=3\!\cdot\!10^{-3}$, \optMuon{} with \code{ns\_steps=5} and \code{ns\_steps=9} both sit near $\approx 3.432\nats{}$, while default \optCoupled{} at the same LR is near $\approx 3.414\nats{}$. Extra plain Newton--Schulz depth by itself does not reproduce the partner-aware gain.

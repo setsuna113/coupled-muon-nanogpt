@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +31,7 @@ from _common import (
     WANDB_ENTITY,
 )
 
-SEED_RE = re.compile(r"s(\d+)$")
+SEED_RE = re.compile(r"(?:^|[^\w])s(\d+)(?:$|[^\d])")
 
 
 def _path(project: str) -> str:
@@ -43,12 +44,42 @@ def _parse_seed(name: str, cfg_seed) -> int | None:
             return int(cfg_seed)
         except (TypeError, ValueError):
             pass
-    m = SEED_RE.search(name)
+    m = SEED_RE.search(str(name))
     return int(m.group(1)) if m else None
 
 
 def _rung_short(rung_long: str) -> str | None:
     return LONG_TO_SHORT.get(rung_long, rung_long)
+
+
+def _float_or_none(x) -> float | None:
+    if x is None:
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _mean_summary(summary, prefix: str, suffix: str) -> float | None:
+    vals = []
+    for key, value in summary.items():
+        if key.startswith(prefix) and key.endswith(suffix):
+            v = _float_or_none(value)
+            if v is not None:
+                vals.append(v)
+    return float(np.mean(vals)) if vals else None
+
+
+def _max_summary(summary, prefix: str, suffix: str) -> float | None:
+    vals = []
+    for key, value in summary.items():
+        if key.startswith(prefix) and key.endswith(suffix):
+            v = _float_or_none(value)
+            if v is not None:
+                vals.append(v)
+    return float(np.max(vals)) if vals else None
 
 
 def summary_df(project: str, *, refresh: bool = False) -> pd.DataFrame:
@@ -63,29 +94,61 @@ def summary_df(project: str, *, refresh: bool = False) -> pd.DataFrame:
     for r in runs:
         cfg = r.config
         opt_cfg = cfg.get("optimizer") or {}
+        model_cfg = cfg.get("model") or {}
+        attn_cfg = model_cfg.get("attn") or {}
+        mlp_cfg = model_cfg.get("mlp") or {}
+        moe_cfg = model_cfg.get("moe") or {}
         rung_long = cfg.get("name", "")
         rows.append({
             "run_id": r.id,
             "name": r.name,
+            "group": getattr(r, "group", None),
+            "job_type": getattr(r, "job_type", None),
+            "tags": ",".join(getattr(r, "tags", []) or []),
             "rung_long": rung_long,
             "rung": _rung_short(rung_long),
             "optimizer": opt_cfg.get("type"),
-            "lr": float(opt_cfg.get("lr")) if opt_cfg.get("lr") is not None else None,
+            "lr": _float_or_none(opt_cfg.get("lr")),
             "coupled_steps": opt_cfg.get("coupled_steps"),
             "final_polish": opt_cfg.get("final_polish"),
             "couple_qk": opt_cfg.get("couple_qk"),
             "couple_vo": opt_cfg.get("couple_vo"),
             "couple_updown": opt_cfg.get("couple_updown"),
+            "couple_router_to_muon": opt_cfg.get("couple_router_to_muon"),
+            "couple_mla": opt_cfg.get("couple_mla"),
             "ns_steps": opt_cfg.get("ns_steps"),
+            "ns_coefficients": opt_cfg.get("ns_coefficients"),
+            "ns_gram_form": opt_cfg.get("ns_gram_form"),
+            "lr_prefactor": opt_cfg.get("lr_prefactor"),
             "use_multi_head": opt_cfg.get("use_multi_head"),
+            "attn_type": attn_cfg.get("attn_type", "mha"),
+            "kv_lora_rank": attn_cfg.get("kv_lora_rank"),
+            "q_lora_rank": attn_cfg.get("q_lora_rank"),
+            "mlp_type": mlp_cfg.get("type"),
+            "moe_enabled": moe_cfg.get("enabled"),
+            "moe_num_experts": moe_cfg.get("num_experts"),
+            "moe_top_k": moe_cfg.get("top_k"),
+            "moe_balancing_type": moe_cfg.get("balancing_type"),
+            "moe_expert_intermediate": moe_cfg.get("intermediate"),
+            "has_mla": attn_cfg.get("attn_type") == "mla",
+            "has_factff": mlp_cfg.get("type") == "factff",
             "seed": _parse_seed(r.name, cfg.get("seed")),
-            "final_val_loss": r.summary.get("final_val_loss"),
+            "final_val_loss": _float_or_none(r.summary.get("final_val_loss")),
+            "final_train_loss": _float_or_none(r.summary.get("final_train_loss")),
             "diverged": bool(r.summary.get("diverged")) if r.summary.get("diverged") is not None else False,
             "final_step": r.summary.get("final_step"),
             "final_tokens": r.summary.get("final_tokens"),
-            "runtime_s": r.summary.get("_runtime"),
+            "runtime_s": _float_or_none(r.summary.get("_runtime")),
+            "probe_router_entropy_mean": _mean_summary(r.summary, "probe/moe_load/", "/router_entropy"),
+            "probe_load_imbalance_mean": _mean_summary(r.summary, "probe/moe_load/", "/imbalance"),
+            "probe_load_imbalance_max": _max_summary(r.summary, "probe/moe_load/", "/imbalance"),
+            "probe_grad_norm_var_mean": _mean_summary(r.summary, "probe/moe_load/", "/grad_norm_var"),
+            "probe_attn_logit_global_max": _float_or_none(r.summary.get("probe/attn_logit/global_max")),
             "project": project,
             "state": r.state,
+            "created_at": getattr(r, "created_at", None),
+            "updated_at": getattr(r, "updated_at", None),
+            "url": getattr(r, "url", None),
         })
     df = pd.DataFrame(rows)
     df.to_parquet(cache, index=False)

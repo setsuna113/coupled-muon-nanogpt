@@ -36,6 +36,8 @@ OPT_MARKER = {
 
 # Dense ladder rung short labels and their wandb config.name values.
 RUNG_ORDER = ["A0", "B", "C", "D", "E", "G", "H"]
+MOE_RUNG_ORDER = ["I", "I'", "J", "K", "L", "M", "N"]
+PHASE2_RUNG_ORDER = ["O_mla", "P_factff", "Z_350m_mla"]
 RUNG_LONG = {
     "A0": "ladder_A0_llama60m",
     "B": "ladder_B_gelu2mat",
@@ -44,6 +46,16 @@ RUNG_LONG = {
     "E": "ladder_E_karpathy",
     "G": "ladder_G_qknorm",
     "H": "ladder_H_modded_dense",
+    "I": "ladder_I_moe",
+    "I'": "ladder_I_prime_relu2_moe",
+    "J": "ladder_J_router_adamw",
+    "K": "ladder_K_deepseek_bias",
+    "L": "ladder_L_shared_expert",
+    "M": "ladder_M_16experts",
+    "N": "ladder_N_4experts",
+    "O_mla": "ladder_O_mla",
+    "P_factff": "ladder_P_factff",
+    "Z_350m_mla": "ladder_Z_350m_mla",
 }
 LONG_TO_SHORT = {v: k for k, v in RUNG_LONG.items()}
 
@@ -53,6 +65,39 @@ WANDB_ENTITY = "liuyc1025-university-of-cambridge"
 PROJECT_STAGE1 = "coupled-muon-A0-repro"
 PROJECT_STAGE2 = "coupled-muon-ladder"
 PROJECT_ABLATION = "coupled-muon-ablation"
+
+# Part II / sparse MoE projects.
+PROJECT_STAGE3_PT1 = "coupled-muon-moe-pt1-prod"
+PROJECT_STAGE3_PT2 = "coupled-muon-moe-pt2-screen"
+PROJECT_STAGE3_ADAMW_I = "coupled-muon-moe-anchor-adamw"
+PROJECT_STAGE3_ADAMW_IPRIME = "coupled-muon-moe-anchor-adamw-Iprime"
+PROJECT_NS_POLICY = "coupled-muon-ns-policy"
+
+PROJECT_K_CURVE = "coupled-muon-k-curve"
+PROJECT_LR_PREFACTOR = "coupled-muon-lr-prefactor"
+PROJECT_MLA = "coupled-muon-mla"
+PROJECT_FACTFF = "coupled-muon-imposed-factff"
+PROJECT_LORA_RANK = "coupled-muon-lora-rank"
+PROJECT_PAIR_POLICY = "coupled-muon-pair-policy"
+PROJECT_MLA_350M = "coupled-muon-mla-350m"
+
+PART2_STAGE3_PROJECTS = [
+    PROJECT_STAGE3_PT1,
+    PROJECT_STAGE3_PT2,
+    PROJECT_STAGE3_ADAMW_I,
+    PROJECT_STAGE3_ADAMW_IPRIME,
+]
+PART2_DEFENSIVE_PROJECTS = [
+    PROJECT_NS_POLICY,
+    PROJECT_K_CURVE,
+    PROJECT_LR_PREFACTOR,
+    PROJECT_MLA,
+    PROJECT_FACTFF,
+    PROJECT_LORA_RANK,
+    PROJECT_PAIR_POLICY,
+    PROJECT_MLA_350M,
+]
+PART2_PROJECTS = [*PART2_STAGE3_PROJECTS, *PART2_DEFENSIVE_PROJECTS]
 
 
 def setup_mpl() -> None:

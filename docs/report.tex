@@ -1,30 +1,30 @@
 \documentclass[11pt,a4paper]{article}
-\input{preamble.tex}
+\input{docs/preamble.tex}
 
 \title{Coupled Muon v2 on a Dense Architecture Ladder at 60M Common-Size:\\
 \large Stage~1 (A0 reproduction) and Stage~2 (B--H bridging ladder)}
 \author{Coupled-Muon-NanoGPT working group}
-\date{Snapshot: \today\quad (Stage~1 73/75 cells, Stage~2 270/270 cells, \S d.4 104/105 cells)}
+\date{Snapshot: 2026-05-19\quad (dense Part~I cache; sparse-MoE interpretation in Part~II)}
 
 \begin{document}
 \maketitle
 
-\input{sections/00_abstract.tex}
-\input{sections/01_intro.tex}
-\input{sections/02_setup.tex}
-\input{sections/03_stage1.tex}
-\input{sections/04_stage2.tex}
-\input{sections/05_synthesis.tex}
-\input{sections/06_limits.tex}
-\input{sections/07_concl.tex}
+\input{docs/sections/00_abstract.tex}
+\input{docs/sections/01_intro.tex}
+\input{docs/sections/02_setup.tex}
+\input{docs/sections/03_stage1.tex}
+\input{docs/sections/04_stage2.tex}
+\input{docs/sections/05_synthesis.tex}
+\input{docs/sections/06_limits.tex}
+\input{docs/sections/07_concl.tex}
 
 \bibliographystyle{plainnat}
-\bibliography{refs}
+\bibliography{docs/refs}
 
 \appendix
-\input{sections/A_stats.tex}
-\input{sections/B_d4_ablations.tex}
-\input{sections/C_reproducibility.tex}
-\input{sections/D_full_run_tables.tex}
+\input{docs/sections/A_stats.tex}
+\input{docs/sections/B_d4_ablations.tex}
+\input{docs/sections/C_reproducibility.tex}
+\input{docs/sections/D_full_run_tables.tex}
 
 \end{document}

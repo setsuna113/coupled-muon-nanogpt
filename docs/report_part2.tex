@@ -1,0 +1,127 @@
+\documentclass[11pt,a4paper]{article}
+\input{docs/preamble.tex}
+
+\title{Coupled Muon v2 on Sparse MoE:\\
+\large Part~II extension of the dense-ladder report}
+\author{Coupled-Muon-NanoGPT working group}
+\date{W\&B snapshot: 2026-05-19 15:51 UTC}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+Part~I established the dense 60M Common-Size baseline: \optCoupled{} beats per-matrix \optMuon{} by a small but repeatable margin on RoPE-equipped dense rungs, and regresses when the implementation falls back to flat-2D Q--K coupling on learned-position rungs. This Part~II asks whether that dense-RoPE gain disappears under sparse MoE routing. On the live 2026-05-19 W\&B snapshot, it does not disappear in the synced MoE rungs: paired own-best \optCoupled{}$-$\optMuon{} deltas are I $-0.0105\nats{}$ ($n{=}5$), I' $-0.0155\nats{}$ ($n{=}5$), J $-0.0104\nats{}$ ($n{=}3$), and K $-0.0100\nats{}$ ($n{=}2$). The correct headline is therefore narrow: the small dense gain appears to survive the currently synced sparse-MoE cells. It is not yet a ``factored sparse extension'' claim. The expected W\&B projects for K-curve, LR-prefactor, \code{O\_mla}, FactFF, pair-policy, and 350M MLA are absent; \code{coupled-muon-lora-rank} exists, but currently has only one finished unpaired O\_mla row and one running row, so it supplies no reportable comparison.
+\end{abstract}
+
+\section{What Part II Inherits From Part I}
+
+Part~I is the dense control report. It fixes the algorithmic claim, the own-best-LR convention, and the paired-bootstrap procedure. This report keeps those choices unchanged: every optimizer is read at its own best learning rate, then paired only by shared seed. Runs with missing seed or missing final validation loss are excluded from paired deltas. Duplicate W\&B rows are grouped by project, rung, optimizer, LR, seed, and active ablation axes; the retained row is the latest final non-null row.
+
+The scientific question is narrower than a general MoE benchmark. Part~I suggested that \optCoupled{}'s gain is tied to RoPE-compatible bilinear products. Sparse MoE adds top-2 routing, per-expert lower effective batch, router competition, and gate-omission approximations in the coupled SwiGLU path. Those changes could have erased the dense gain; the current evidence says they have not erased it on the synced I/I'/J/K cells.
+
+\section{Snapshot And Completion}
+
+\begin{table}[h]
+\centering
+\scriptsize
+\resizebox{\linewidth}{!}{\tabincl{tab20_part2_completion}}
+\caption{Part~II completion matrix from the 2026-05-19 W\&B snapshot. ``Final cells'' are deduped, finished rows with non-null \code{final\_val\_loss} and parsed seed. Missing future Phase-2 projects are evidence gaps, not zero-effect results.}\label{tab:part2-completion}
+\end{table}
+
+The completion table is the guardrail for every claim below. \code{coupled-muon-moe-pt1-prod} is complete. \code{coupled-muon-moe-pt2-screen} is partial: J is usable, K is usable for a current partial readout, and L/M/N are not reportable as optimizer comparisons. The AdamW anchors are mixed: I remains incomplete after dedupe, with only seeds 0--2 at its deduped best LR, while I' is now a complete 25/25-row, five-seed anchor. The NS-policy project exists, but three final cells are missing. \code{coupled-muon-lora-rank} is no longer absent, but it is still pre-comparison evidence: one finished \code{O\_mla} \optCoupled{} row at \code{kv\_lora\_rank=256} and one running row at \code{kv\_lora\_rank=128}.
+
+\section{Stage 3 Sparse-MoE Result}
+
+\begin{figure}[h]
+\centering
+\figincl{part2_fig_stage3_forest}
+\caption{Paired-bootstrap 95\% CIs at each arm's own best LR. Negative values favour the optimizer named on the left. I and I' have five paired Muon-family seeds; J is a three-seed screening readout; K currently has two paired best-LR seeds because the best Muon row is missing seed 0. AdamW comparisons are valid only where AdamW anchors have shared seeds.}\label{fig:part2-stage3-forest}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\tabincl{tab21_part2_best_lr}
+\caption{Best LR per sparse-MoE rung and optimizer after dedupe. L has only a single Muon best-LR seed and is not used for a Coupled-vs-Muon claim.}\label{tab:part2-best-lr}
+\end{table}
+
+The main result is that the dense-RoPE signal survives the currently synced sparse-MoE rungs. At each arm's own best LR, \optCoupled{} beats \optMuon{} on I by $-0.0105\nats{}$ with a 95\% CI $[-0.0121,-0.0080]$, on I' by $-0.0155\nats{}$ with CI $[-0.0168,-0.0104]$, on J by $-0.0104\nats{}$ with CI $[-0.0120,-0.0090]$, and on K by $-0.0100\nats{}$ with CI $[-0.0103,-0.0097]$ over the two seeds shared by K's current best-LR rows. This is not the predicted collapse-to-zero at the MoE boundary.
+
+The AdamW anchors remain a calibration, not a finished cross-project equalization claim. On I, the own-best \optMuon{} and \optCoupled{} rows beat the best available AdamW row by roughly $0.081$ and $0.091\nats{}$ respectively over shared seeds 0--2. On I', the AdamW anchor is now complete and pairs all five seeds; the Muon-family rows beat it by roughly $0.092$--$0.103\nats{}$, though the CI is wider because the AdamW seed outcomes are heterogeneous. These anchors support ``Muon-family still beats this AdamW anchor'', but AdamW should stay separate from the dense+sparse Coupled-vs-Muon comparison until sparse AdamW I is also complete and deduped.
+
+\section{Dense And Sparse Comparison}
+
+\begin{table}[h]
+\centering
+\scriptsize
+\resizebox{\linewidth}{!}{\tabincl{tab23_dense_sparse_muon}}
+\caption{Unified Coupled-vs-Muon readout across dense and currently synced sparse rungs. Deltas are paired median final-validation-loss differences at each arm's own best LR; negative values favour \optCoupled{}. Runtime is the median \optCoupled{}/\optMuon{} ratio at those own-best LR rows, and is diagnostic rather than a speedup claim.}\label{tab:dense-sparse-muon}
+\end{table}
+
+Table~\ref{tab:dense-sparse-muon} is the clean cross-project comparison to carry forward. It keeps AdamW out of the table because the sparse AdamW I anchor is still incomplete, and it keeps the factored-architecture rows out because MLA, FactFF, pair-policy, K-curve, LR-prefactor, and 350M MLA have not landed under reportable W\&B projects. The runtime column also prevents over-reading the fixed-token deltas: \optCoupled{} is generally slower than \optMuon{} at own-best LR, so the observed loss deltas are not by themselves wall-clock speedups.
+
+\section{NS-Policy Defensive Ablation}
+
+\begin{figure}[h]
+\centering
+\figincl[0.68\linewidth]{part2_fig_ns_policy_heatmap}
+\caption{NS-policy paired deltas on A0. Negative values favour \optCoupled{}. Empty/missing cells are deliberately shown instead of interpolated.}\label{fig:part2-ns-policy}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\tabincl{tab22_part2_ns_policy}
+\caption{NS-policy final-loss table. The full $\{\text{Bernstein},\text{Cesista},\text{Polar-Express}\}\times K{=}\{3,5,8\}$ robustness claim is not yet available: Polar-Express K=8 has no Coupled final row, and Cesista K=8 has only one paired seed.}\label{tab:part2-ns-policy}
+\end{table}
+
+The observed NS-policy rows are directionally favourable to \optCoupled{}, but the grid is not complete enough for a robustness headline. The large K=3 gaps partly reflect \optMuon{} being under-iterated: moving \optMuon{} from K=3 to K=5 cuts much of the apparent advantage before the policy differences matter. The defensible robustness statement is narrower: for the observed K$\geq$5 cells, the gap remains negative and around $0.016$--$0.019\nats{}$. Bernstein is fully observed at K=3/5/8, but Cesista K=8 has only one Coupled seed and Polar-Express K=8 has no Coupled final row. The report therefore uses the NS-policy data as a defensive partial check, not as proof that the sparse-MoE result is invariant to every NS coefficient policy.
+
+\section{Secondary MoE Probes}
+
+\begin{figure}[h]
+\centering
+\figincl{part2_fig_moe_probes}
+\caption{Final-summary MoE probes at best LR: router entropy, load imbalance, expert grad-norm variance, attention-logit maximum, and runtime. These panels are diagnostics for where to look next; they are not primary evidence for the optimizer delta.}\label{fig:part2-moe-probes}
+\end{figure}
+
+The probe panels are useful mainly for triage. K still shows a Coupled-vs-Muon win, but its absolute loss is worse than I and J, and its router/load statistics are qualitatively different: best-LR K has router entropy around $1.34$--$1.40$ and mean load imbalance around $1.67$--$1.71$, versus roughly $1.51$--$1.54$ entropy and $1.09$--$1.11$ load imbalance on I/J Muon-family rows. DeepSeek-style bias balancing is therefore not a fix in the current data; it changes the routing regime while leaving higher absolute loss. \optCoupled{} also tends to show higher expert grad-norm variance and higher attention-logit maxima than \optMuon{} in the MoE rows. Those are diagnostics for follow-up probes, not causal proof; the primary claim remains the paired final-validation-loss delta.
+
+\section{Phase-2 Gaps}
+
+The current snapshot does not support a factored-architecture headline. The expected projects \code{coupled-muon-k-curve}, \code{coupled-muon-lr-prefactor}, \code{coupled-muon-mla}, \code{coupled-muon-imposed-factff}, \code{coupled-muon-pair-policy}, and \code{coupled-muon-mla-350m} are absent under those names. \code{coupled-muon-lora-rank} has started, but one finished unpaired \optCoupled{} row and one running row cannot support a LoRA-rank or MLA conclusion. These cells should remain future work unless new synced projects are explicitly mapped into this report.
+
+The \code{O\_mla} rung should also be described precisely when it lands. Per \code{configs/ladder/O\_mla.yaml}, it is I's sparse-MoE backbone with DeepSeek-V2/V3-style MLA attention, \code{use\_multi\_head=false}, K-side $(W_{UK},W_{DKV})$ coupling, optional Q coupling, and the UV path routed to plain \optMuon{}. It is not a full shared-DKV three-way MLA coupling, DeepSeek-V4 evidence, Qwen3-Next evidence, or Kimi-KDA evidence.
+
+\section{Conclusion}
+
+Part~II changes the Stage~3 answer from ``open'' to ``currently survives'': the small dense \optCoupled{} advantage over \optMuon{} is still visible in the synced sparse-MoE rungs I, I', J, and K. The claim should stay small. It is a final-val-loss, own-best-LR, paired-seed result over available 60M Common-Size MoE cells, with incomplete AdamW I equalization, diagnostic-only MoE probes, and missing Phase-2 factored experiments. The next evidence-bearing work is to finish the missing pt2 rows, complete and dedupe sparse AdamW I, repair the missing NS-policy cells, and then launch the MLA/FactFF/pair-policy projects under traceable W\&B names.
+
+\appendix
+
+\section{Paired Endpoint Evidence}
+
+Table~\ref{tab:paired-endpoints} is the seed-level audit trail for the Coupled-vs-Muon medians in Table~\ref{tab:dense-sparse-muon}. The dense A0--H rows are repeated here because Part~II inherits those controls from Part~I; the sparse I/I'/J/K rows are the direct evidence for the Part~II headline. Each partial sparse claim is therefore tied to its paired-seed count: I and I' use five shared seeds, J uses three, and K currently uses two.
+
+\begin{small}
+\tabincl{tab07_full_perchell}
+\end{small}
+
+\section{Reproducibility Snapshot}
+
+The project completion counts in Table~\ref{tab:part2-completion} are generated from the snapshot recorded below. Missing Phase-2 cells stay explicit in \code{docs/data/part2\_missing\_cells.csv}; discarded duplicate rows are retained separately for audit rather than silently collapsed.
+
+\begin{table}[h]
+\centering
+\scriptsize
+\tabincl{tab24_part2_repro_snapshot}
+\caption{Part~II snapshot metadata, CSV pointers, and dedupe rule.}\label{tab:part2-repro-snapshot}
+\end{table}
+
+\begin{table}[h]
+\centering
+\scriptsize
+\resizebox{\linewidth}{!}{\tabincl{tab25_part2_repro_hashes}}
+\caption{SHA-256 hashes for the Part~II parquet snapshots used by this report.}\label{tab:part2-repro-hashes}
+\end{table}
+
+\end{document}

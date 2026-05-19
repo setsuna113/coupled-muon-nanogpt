@@ -1,6 +1,6 @@
-\section{Stage 1: A0 (LLaMA-60M) reproduction}\label{sec:stage1}
+\section{Stage 1: A0 (in-repo LLaMA-like 60M reproduction)}\label{sec:stage1}
 
-Stage~1 is the gate experiment from the design document: ``coupled-vs-Muon gap must be real and $\geq 3\times$ seed-to-seed std before proceeding.'' We run all three optimizers under the dense LLaMA-60M baseline with five seeds per (optimizer, LR) cell.
+Stage~1 is the gate experiment from the design document: ``coupled-vs-Muon gap must be real and $\geq 3\times$ seed-to-seed std before proceeding.'' We run all three optimizers under the dense in-repo LLaMA-like 60M harness with five seeds per (optimizer, LR) cell. This validates the local harness used by the ladder; it should not be read as proof that the result is fully equivalent to an external LLaMA training setup.
 
 \begin{figure}[h]
 \centering
