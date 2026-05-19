@@ -1,3 +1,5 @@
+# status: superseded-by-phaseC-pair-policy-lr — Phase 2.1 expands to 3 LRs.
+# This single-LR YAML is kept on disk for reference; not in active dispatch.
 # Phase-2 Tier A1 (3/3) — Pair-selection at production rung I, full coupling.
 # Self-consistency check vs Phase-1's I-CoupledMuon production cells; same
 # defaults as `lr_grid_moe_pt1_production.yaml`'s I-CoupledMuon arm but with

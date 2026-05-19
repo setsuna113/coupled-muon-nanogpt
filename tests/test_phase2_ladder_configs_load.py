@@ -22,7 +22,7 @@ LADDER_DIR = REPO_ROOT / "configs" / "ladder"
 
 
 @pytest.mark.parametrize(
-    "rung", ["O_mla", "P_factff", "Z_350m_dense", "Z_350m_mla"]
+    "rung", ["O_mla", "P_factff", "Z_350m_dense", "Z_350m_mla", "H_prime_partial_rope"]
 )
 def test_phase2_rung_builds(rung):
     cfg_path = LADDER_DIR / f"{rung}.yaml"

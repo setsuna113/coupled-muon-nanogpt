@@ -122,6 +122,24 @@ optimizer:
   # ablate them at rungs O_mla and P_factff.
   couple_mla: true
   couple_factff: true
+  # Phase-2.1 pair_policy enum (experiment.md d.7). When set (non-null),
+  # overrides the couple_qk/couple_vo/couple_updown booleans. Conflicts with
+  # explicit booleans raise ValueError unless allow_pair_policy_override=true.
+  # Canonical values: attention_only | ffn_only | all | null.
+  pair_policy: null
+  allow_pair_policy_override: false
+  # Phase-2.1 Q-K policy interface (experiment.md d.7.3). Defaults preserve
+  # Phase-1 numerics bitwise — `legacy_rope2d` under full RoPE dispatches to
+  # the unmodified legacy multi-head 2-D rotation-pair function;
+  # `current_flat2d_fallback` under non-full-RoPE dispatches to the unmodified
+  # flat-2D kernel. partial_rope_split is INVALID for rope_status=none
+  # (pos_emb.type=learned); factory fails fast on that combination.
+  qk_coupling:
+    full_rope: legacy_rope2d          # legacy_rope2d | off
+    no_rope_policy: current_flat2d_fallback
+    # current_flat2d_fallback | qk_off | headwise_no_rope
+    partial_rope_policy: current_flat2d_fallback
+    # current_flat2d_fallback | qk_off | headwise_no_rope | partial_rope_split
 
 train:
   total_tokens: 100_000_000     # smoke default; ladder configs override
@@ -140,7 +158,7 @@ train:
     attn_logit_interval_tokens: 5_000_000
     moe_load_interval_tokens: 0       # MoE-only; ladder/I_moe and smoke/I_moe override
     ns_internal_interval_tokens: 0    # diagnostic-only; per d.6.3
-    # Phase-2 LoRA-RITE one-factor-dominates probe (suggestion.md §2.7). Zero
-    # compute cost (two .norm() per pair). Off by default; rungs O_mla,
-    # P_factff and Stage-3 production sweeps will turn it on.
-    pair_factor_ratio_interval_tokens: 0
+    # Phase-2.1 LoRA-RITE one-factor-dominates probe (suggestion.md §2.7).
+    # Zero compute cost (two .norm() per pair). Default turned ON for all
+    # Phase-2.1 sweeps (experiment.md d.7.5); smoke YAMLs override to 0.
+    pair_factor_ratio_interval_tokens: 50_000_000

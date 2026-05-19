@@ -1,3 +1,6 @@
+# status: superseded-by-pt1/pt2/pt3 — kept on disk as the original raw grid;
+# Stage 3 dispatch uses the split slices (lr_grid_moe_pt1_production.yaml +
+# lr_grid_moe_pt2_screening.yaml + lr_grid_moe_pt3_telescope.yaml).
 # MoE LR sweep across rungs I', I, J, K, L, M, N (60M-CS Common-Size dense
 # backbone; per-expert MLP scaled per d.5). 5 seeds per d.6.8 because different
 # router init produces different per-expert load and therefore different Muon

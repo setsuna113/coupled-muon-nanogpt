@@ -1,3 +1,4 @@
+# status: archive-stage1 — kept on disk for reproduction reference; not in active dispatch.
 # Stage 1 reproduction (experiment.md): A0 LLaMA-60M-class baseline with AdamW.
 # 5 seeds × 5 LRs = 25 runs. Run alongside A0_stage1_muon.yaml; together they
 # constitute the Stage 1 reproduction gate.

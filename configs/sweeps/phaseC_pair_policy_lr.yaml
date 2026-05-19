@@ -1,0 +1,30 @@
+# Phase-2.1 C1 — MoE pair_policy localization at production rung I, with own-
+# best LR per policy. Supersedes the Phase-2 single-LR pair_policy_*.yaml
+# trio (review v2.1 / v3.2).
+#
+# Phase C decides the MoE default for D1: attention_only / ffn_only / all.
+# Single-LR comparison is not defensible because I has Coupled best-LR=1e-2
+# but I' has 3e-2 — LR drift across MoE arms is real. The 3-LR grid lets
+# each policy pick its own best LR.
+#
+# 45 cells = 3 policies × 3 LRs × 5 seeds. Coupled only (Muon comparison is
+# already in I's Phase-1 production cells). Lives on R_screen (8×H100,
+# 4-way parallel for MoE rung), ~3.9 h/cell, ~1.83 R_screen days.
+base: configs/ladder/I_moe.yaml
+grid:
+  optimizer.pair_policy: [attention_only, ffn_only, all]
+  optimizer.lr: [3.0e-3, 1.0e-2, 3.0e-2]
+  seed: [0, 1, 2, 3, 4]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.coupled_steps: 4
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  optimizer.qk_coupling.full_rope: legacy_rope2d
+  optimizer.qk_coupling.no_rope_policy: current_flat2d_fallback
+  optimizer.qk_coupling.partial_rope_policy: current_flat2d_fallback
+  optimizer.use_multi_head: true
+  optimizer.allow_pair_policy_override: true
+  # ^ pair_policy sets couple_qk/vo/updown internally; let the enum drive.
+  run.wandb_project: coupled-muon-pair-policy-lr
+  run.wandb_group: "${name}/phase2.1_c_pair_policy_${optimizer.pair_policy}_lr${optimizer.lr}"

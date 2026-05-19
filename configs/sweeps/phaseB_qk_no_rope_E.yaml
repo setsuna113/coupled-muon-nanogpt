@@ -1,0 +1,28 @@
+# Phase-2.1 B1 — qk_coupling.no_rope_policy sweep at rung E (Karpathy /
+# vanilla GPT-2: LayerNorm + biases + learned-pos + GELU-2mat). 27 cells =
+# 3 policies × 3 LRs × 3 seeds. partial_rope_split is INVALID at rope_status=
+# "none".
+#
+# E is the negative-control rung: under the v2.1 winner, E must not show a
+# NEW regression vs Muon (review v3 §"E behavior").
+#
+# Lives on R_screen (8×H100, 4-way parallel), ~1.3 h/cell, ~0.37 R_screen days.
+base: configs/ladder/E_karpathy.yaml
+grid:
+  optimizer.qk_coupling.no_rope_policy:
+    [current_flat2d_fallback, qk_off, headwise_no_rope]
+  optimizer.lr: [1.0e-3, 3.0e-3, 1.0e-2]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.coupled_steps: 4
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  optimizer.qk_coupling.full_rope: legacy_rope2d
+  optimizer.qk_coupling.partial_rope_policy: current_flat2d_fallback
+  optimizer.use_multi_head: true
+  optimizer.couple_qk: true
+  optimizer.couple_vo: true
+  optimizer.couple_updown: true
+  run.wandb_project: coupled-muon-qk-policy
+  run.wandb_group: "${name}/phase2.1_b_qk_E_${optimizer.qk_coupling.no_rope_policy}_lr${optimizer.lr}"

@@ -1,3 +1,6 @@
+# status: superseded-by-phaseD3-lora-rank-paired — unpaired sweep cannot
+# support a Coupled-vs-Muon rank-knee claim. Phase 2.1 uses the paired
+# 30-cell variant (2 opts × 5 ranks × 3 seeds), conditional on D1 positive.
 # Phase-2 Tier B1 — LoRA-rank (kv_lora_rank) sensitivity at O_mla.
 # At what rank does CoupledMuon stop being worth it (suggestion.md B1 / §229)?
 # Important for scale-extrapolation: a low knee means CoupledMuon scales

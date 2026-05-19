@@ -1,0 +1,21 @@
+# Phase-2.1 B1 — H' Muon baseline. H' is a new ladder rung (partial-RoPE 0.5
+# variant of H), and no historical Muon baseline exists. Without this, the
+# Phase-B partial_rope_policy decision "H' winner ≥ H' Muon" cannot be
+# evaluated (review v3.4).
+#
+# 9 cells = 3 LRs × 3 seeds. The LR grid {3e-3, 1e-2, 3e-2} matches the upper
+# 3 of the Coupled partial_rope_policy grid {1e-3, 3e-3, 1e-2, 3e-2} so the
+# Muon best-LR is bracketed.
+#
+# Lives on R_screen (8×H100, 4-way parallel), ~1.0 h/cell (plain Muon),
+# ~0.09 R_screen days.
+base: configs/ladder/H_prime_partial_rope.yaml
+grid:
+  optimizer.lr: [3.0e-3, 1.0e-2, 3.0e-2]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: muon
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  run.wandb_project: coupled-muon-qk-policy
+  run.wandb_group: "${name}/phase2.1_b_muon_Hprime_lr${optimizer.lr}"

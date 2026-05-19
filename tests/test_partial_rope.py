@@ -60,65 +60,18 @@ def test_partial_rope_model_trains_one_step(frac):
     assert grads_finite
 
 
-def test_factory_disables_multi_head_under_partial_rope():
-    torch.manual_seed(0)
-    model = _build_partial_rope_model(frac=0.5)
-    cfg = OmegaConf.create(
+def _minimal_cfg(*, rope_partial_frac: float, pos_type: str, hidden: int = 64,
+                  n_heads: int = 4) -> OmegaConf:
+    return OmegaConf.create(
         {
             "model": {
-                "hidden": 64,
-                "attn": {"n_heads": 4, "n_kv_heads": None, "rope_partial_frac": 0.5},
-                "pos_emb": {"type": "rope"},
-            },
-            "optimizer": {
-                "type": "coupled_muon_v2",
-                "lr": 1e-3,
-                "wd": 0.0,
-                "momentum": 0.95,
-                "betas": [0.95, 0.95],
-                "eps": 1e-8,
-                "ns_steps": 5,
-                "coupled_steps": 4,
-                "couple_qk": True,
-                "couple_vo": True,
-                "couple_updown": True,
-                "use_multi_head": True,  # would be invalid under partial RoPE
-                "ns_dtype": "bf16",
-            },
-        }
-    )
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        opt = build_optimizer(model, cfg)
-        unsafe_warnings = [
-            w for w in caught if "use_multi_head" in str(w.message)
-        ]
-        assert unsafe_warnings, "expected warning when use_multi_head=True under partial RoPE"
-    assert opt.use_multi_head is False, "factory should disable multi_head under partial RoPE"
-
-
-def test_factory_disables_multi_head_under_learned_pos_emb():
-    """Audit #6: with pos_emb.type=learned the QK 2-D rotation-pair reshape
-    has no semantic meaning, so multi_head must also be disabled."""
-    torch.manual_seed(0)
-    block = BlockConfig(
-        hidden=64,
-        n_heads=4,
-        intermediate=128,
-        norm_type="rmsnorm",
-        mlp_type="swiglu",
-        pos_emb_type="learned",
-        rope_partial_frac=1.0,
-        qk_norm=False,
-        max_seq_len=128,
-    )
-    model = GPT(GPTConfig(vocab_size=128, n_layers=2, block=block))
-    cfg = OmegaConf.create(
-        {
-            "model": {
-                "hidden": 64,
-                "attn": {"n_heads": 4, "n_kv_heads": None, "rope_partial_frac": 1.0},
-                "pos_emb": {"type": "learned"},
+                "hidden": hidden,
+                "attn": {
+                    "n_heads": n_heads,
+                    "n_kv_heads": None,
+                    "rope_partial_frac": rope_partial_frac,
+                },
+                "pos_emb": {"type": pos_type},
             },
             "optimizer": {
                 "type": "coupled_muon_v2",
@@ -134,12 +87,51 @@ def test_factory_disables_multi_head_under_learned_pos_emb():
                 "couple_updown": True,
                 "use_multi_head": True,
                 "ns_dtype": "bf16",
+                "qk_coupling": {
+                    "full_rope": "legacy_rope2d",
+                    "no_rope_policy": "current_flat2d_fallback",
+                    "partial_rope_policy": "current_flat2d_fallback",
+                },
             },
         }
     )
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        opt = build_optimizer(model, cfg)
-        msgs = [str(w.message) for w in caught]
-        assert any("use_multi_head" in m for m in msgs), msgs
-    assert opt.use_multi_head is False
+
+
+def test_factory_forces_vo_flat2d_under_partial_rope():
+    """Phase-2.1: V-O routing under rope_status='partial' must always go through
+    legacy flat-2D, regardless of use_multi_head=True. The Q-K branch is now
+    policy-mediated; V-O is hard-locked to flat-2D off full RoPE (review v3.4).
+    """
+    torch.manual_seed(0)
+    model = _build_partial_rope_model(frac=0.5)
+    cfg = _minimal_cfg(rope_partial_frac=0.5, pos_type="rope")
+    opt = build_optimizer(model, cfg)
+    # User asked for use_multi_head=True; optimizer keeps that for the Q-K
+    # dispatch but internally forces V-O to flat-2D.
+    assert opt.use_multi_head is True
+    assert opt._use_multi_head_vo is False
+    assert opt.rope_status == "partial"
+
+
+def test_factory_forces_vo_flat2d_under_learned_pos_emb():
+    """Audit #6 / Phase-2.1: with pos_emb.type=learned, V-O routing goes to
+    legacy flat-2D. Q-K dispatch is governed by qk_coupling.no_rope_policy
+    (default current_flat2d_fallback preserves legacy numerics)."""
+    torch.manual_seed(0)
+    block = BlockConfig(
+        hidden=64,
+        n_heads=4,
+        intermediate=128,
+        norm_type="rmsnorm",
+        mlp_type="swiglu",
+        pos_emb_type="learned",
+        rope_partial_frac=1.0,
+        qk_norm=False,
+        max_seq_len=128,
+    )
+    model = GPT(GPTConfig(vocab_size=128, n_layers=2, block=block))
+    cfg = _minimal_cfg(rope_partial_frac=1.0, pos_type="learned")
+    opt = build_optimizer(model, cfg)
+    assert opt.use_multi_head is True
+    assert opt._use_multi_head_vo is False
+    assert opt.rope_status == "none"

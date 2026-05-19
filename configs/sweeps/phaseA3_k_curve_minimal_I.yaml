@@ -1,0 +1,18 @@
+# Phase-2.1 A3 — minimal K-curve at I (production MoE rung). Companion to
+# phaseA3_k_curve_minimal_A0.yaml for the dense rung. The K-curve must be
+# checked at the MoE rung too because per-expert SNR can change the K
+# requirement.
+#
+# 9 cells = 3 K values × 3 seeds. CoupledMuon only. Lives on R_prod
+# (4×H200), ~3.9 h/cell, ~1.46 R_prod days.
+base: configs/ladder/I_moe.yaml
+grid:
+  optimizer.coupled_steps: [1, 2, 4]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.lr: 1.0e-2
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  run.wandb_project: coupled-muon-k-curve-I
+  run.wandb_group: "${name}/phase2.1_a3_I_K${optimizer.coupled_steps}"

@@ -50,6 +50,7 @@ train:
     coupled_pair_interval_tokens: 0
     attn_logit_interval_tokens: 0
     moe_load_interval_tokens: 500_000
+    pair_factor_ratio_interval_tokens: 0
 
 run:
   wandb: false

@@ -1,3 +1,4 @@
+# status: archive-stage2 — kept on disk for reproduction reference; not in active dispatch.
 # d.3 telescoping LR sweep — AdamW baseline across dense rungs B, C, D, E,
 # G, H (60M-CS Common-Size; A1 dropped after the size collapse). Per Essential
 # AI 2505.02222: AdamW LRs {3e-5, 1e-4, 3e-4, 1e-3, 3e-3}. Run alongside

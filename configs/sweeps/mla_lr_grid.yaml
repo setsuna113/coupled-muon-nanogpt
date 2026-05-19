@@ -1,3 +1,11 @@
+# status: phase2.1-D1 — active D1 sweep. Bake the Phase B winners and Phase C
+# pair_policy default via `--override` at launch time:
+#   --override optimizer.qk_coupling.no_rope_policy=<B no-RoPE winner>
+#   --override optimizer.qk_coupling.partial_rope_policy=<B partial-RoPE winner>
+#   --override optimizer.pair_policy=<C winner>
+# MLA-pair routing (W_UK, W_DKV) and (W_UQ, W_DQ) is INDEPENDENT of the
+# qk_coupling block (they go through `couple_mla`, not classic q_proj/k_proj).
+# `pair_policy=attention_only` does NOT disable MLA K-side coupling.
 # Phase-2 Tier S2 — Cross-optimizer triple at rung O_mla (60M-CS MLA MoE).
 # Headline production cells for Phase 2: the single architecture that
 # exercises CoupledMuon's distinctive factor-aware geometry (suggestion.md

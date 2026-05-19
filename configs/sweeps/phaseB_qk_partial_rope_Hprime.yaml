@@ -1,0 +1,28 @@
+# Phase-2.1 B1 — qk_coupling.partial_rope_policy sweep at rung H' (partial
+# RoPE, rope_partial_frac=0.5). All 4 policies are valid here (this is the
+# only rung where partial_rope_split is meaningful). LR grid is extended to
+# 4 points to match the H' Muon baseline's grid (review v3.3 — fairness
+# under H' Muon comparison).
+#
+# 48 cells = 4 policies × 4 LRs × 3 seeds.
+#
+# Lives on R_screen (8×H100, 4-way parallel), ~1.3 h/cell, ~0.65 R_screen days.
+base: configs/ladder/H_prime_partial_rope.yaml
+grid:
+  optimizer.qk_coupling.partial_rope_policy:
+    [current_flat2d_fallback, qk_off, headwise_no_rope, partial_rope_split]
+  optimizer.lr: [1.0e-3, 3.0e-3, 1.0e-2, 3.0e-2]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.coupled_steps: 4
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  optimizer.qk_coupling.full_rope: legacy_rope2d
+  optimizer.qk_coupling.no_rope_policy: current_flat2d_fallback
+  optimizer.use_multi_head: true
+  optimizer.couple_qk: true
+  optimizer.couple_vo: true
+  optimizer.couple_updown: true
+  run.wandb_project: coupled-muon-qk-policy
+  run.wandb_group: "${name}/phase2.1_b_qk_Hprime_${optimizer.qk_coupling.partial_rope_policy}_lr${optimizer.lr}"

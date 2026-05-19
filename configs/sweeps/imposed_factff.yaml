@@ -1,3 +1,5 @@
+# status: phase2.1-D4-conditional — CONDITIONAL on Phase D1 (O_mla) positive.
+# Only commission after D1 readout: delta_p50 > 1.5 × pooled_seed_std.
 # Phase-2 Tier B3 — Imposed FFN factorisation transfer test.
 # Does CoupledMuon's advantage transfer from NATIVE factor structure
 # (MLA) to IMPOSED factor structure (FactorizedMLP)? If yes, CoupledMuon

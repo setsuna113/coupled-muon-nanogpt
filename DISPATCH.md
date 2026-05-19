@@ -73,57 +73,108 @@ T=0 Rig B launch. Stage 3 cell budget cut from the full 350 (in
 
 ---
 
-## Active dispatch (Phase 2)
+## Active dispatch (Phase 2.1)
 
-Phase 2 adds three new lanes of cells across the three idle rigs. The headline goal is the **MLA cross-optimizer triple at O_mla** plus an NS-policy defence (S1) and an AdamW-tuning equalizer (A3). See `experiment.md` §d.7 for the design rationale. Total expansion ≈ 207 cells, ~18 rig-days work against the +22 rig-day generous budget.
+Phase 2.1 replaces the flat Phase-2 schedule with a gated tree (A/B/C/D/E).
+Phase B (qk_coupling repair at non-RoPE / partial-RoPE rungs) is highest
+priority — it fixes a known algorithm failure (factory's silent flat-2D
+fallback under non-full RoPE) and produces the v2.1 (`no_rope_winner`,
+`partial_rope_winner`) tuple required for Phase D. Phase C re-runs MoE
+pair_policy localization with own-best-LR per policy. Phase D launches O_mla
+only after both winners are declared; Phase E is gated on Phase D positive.
 
-| Rig | Sweeps (run in order) | Cells | Wandb project(s) | Results dir |
+See `experiment.md §d.7` for the design rationale, decision rules, and
+semantic table. Items removed from active plan (LR-prefactor, unconditional
+FactFF/350M/LoRA-rank, full K-curve, L MoE rung, A1' AdamW@I' top-up) stay
+on disk with `# status: ...` comment-headers; do NOT relaunch them.
+
+### Lane queue per rig
+
+| Rig | Queue (in order) | Cells | Wandb projects | Results dirs |
 |---|---|---|---|---|
-| **R_abl — 2×H200** | `ns_coeff_K_sweep` (S1, 36) → `k_curve_at_winner` (S3, 18) → `lr_prefactor_ablation` (A2, 16) → `imposed_factff` (B3, 12) | 82 | `coupled-muon-ns-policy`, `coupled-muon-k-curve`, `coupled-muon-lr-prefactor`, `coupled-muon-imposed-factff` | `$GLOBAL/phase2-rigC-{ns-policy,k-curve,lr-prefactor,imposed-factff}/` |
-| **R_prod — 4×H200** | `mla_lr_grid` (S2, 45) → `mla_scaling_350m` (stretch, 30 — conditional) | 75 (or 45 if stretch NO-GO) | `coupled-muon-mla`, `coupled-muon-mla-350m` | `$GLOBAL/phase2-rigA-{mla,mla-350m}/` |
-| **R_screen — 8×H100** | `adamw_equalization_I_prime` (A3.I', 10) → `lora_rank_sweep` (B1, 15) → `adamw_equalization_I` (A3.I, 10) → `pair_policy_{attn_only,ffn_only,all}` (A1, 15) | 50 | `coupled-muon-moe-anchor-adamw-Iprime`, `coupled-muon-lora-rank`, `coupled-muon-moe-anchor-adamw`, `coupled-muon-pair-policy` | `$GLOBAL/phase2-rigB-{adamw-Iprime,lora-rank,adamw-I,pair-policy}/` |
+| **R_abl — 2×H200** | `phaseA3_k_curve_minimal_A0` (9) → `phaseA2_polar_express_K8_coupled_topup` + `phaseA2_cesista_K8_paired_topup` (4) → idle / `imposed_factff` (D4, 12, conditional) | 13 (+12 cond.) | `coupled-muon-k-curve`, `coupled-muon-ns-policy`, `coupled-muon-imposed-factff` | `$GLOBAL/phase2.1-rigC-{a3-kcurve-a0,a2-ns-topup,d4-factff}/` |
+| **R_prod — 4×H200** | `adamw_equalization_I` (A1, 10) → `phaseA3_k_curve_minimal_I` (9) → `mla_lr_grid` (D1, 45) → `mla_scaling_350m` (E1, 30, conditional) | 64 (+30 cond.) | `coupled-muon-moe-anchor-adamw`, `coupled-muon-k-curve-I`, `coupled-muon-mla`, `coupled-muon-mla-350m` | `$GLOBAL/phase2.1-rigA-{a1-adamw-I-topup,a3-kcurve-I,d1-mla,e1-mla-350m}/` |
+| **R_screen — 8×H100** | `phaseB_qk_no_rope_C` (27) → `phaseB_qk_no_rope_D` (27) → `phaseB_qk_no_rope_E` (27) → `phaseB_qk_partial_rope_Hprime` (48) → `phaseB_muon_baseline_Hprime` (9) → `phaseB2_confirm_no_rope` (10) → `phaseB2_confirm_partial_rope` (5) → `phaseC_pair_policy_lr` (45) → idle / `phaseD3_lora_rank_paired_conditional` (D3, 30, conditional) | 198 (+30 cond.) | `coupled-muon-qk-policy`, `coupled-muon-qk-policy-confirm`, `coupled-muon-pair-policy-lr`, `coupled-muon-lora-rank-paired` | `$GLOBAL/phase2.1-rigB-{b-qk-{no-rope,partial-rope,muon-baseline}-*, b2-{no,partial}-rope-confirm, c-pair-policy, d3-lora-rank}/` |
 
-### Phase-2 timeline (T=0 = Phase-2 launch)
+R_screen is the global critical path at ~4.12 rig-days through Phase B + C.
+
+### Phase-2.1 timeline (T=0 = Phase 2.1 launch)
 
 | T (rig-days) | Event |
 |---|---|
-| 0     | R_abl starts S1; R_prod starts S2 (Bernstein default — winner backfilled at T+1.5d); R_screen starts A3.I'. |
-| 0.25  | R_screen finishes A3.I'. Starts B1. |
-| 1.5   | R_abl finishes S1. **MILESTONE: NS-policy winner declared.** Re-emit S3/S2/A1/B1/stretch JSONLs with the winner's `optimizer.ns_coefficients` value. |
-| 2.15  | R_screen finishes B1. Starts A3.I (reassigned from R_prod). |
-| 2.25  | R_abl finishes S3. Starts A2. |
-| 2.4   | R_screen finishes A3.I. Starts A1 (reassigned from R_prod). |
-| 2.92  | R_abl finishes A2. Starts B3. |
-| 3.4   | R_screen finishes A1. R_screen idle. |
-| 3.42  | R_abl finishes B3. R_abl idle. |
-| 5.6   | R_prod finishes S2. **MILESTONE: O_mla cross-optimizer triple done. 350M-stretch GO/NO-GO decision.** |
-| ~15.3 | R_prod finishes 350M stretch (if commissioned; sequential 4-GPU DDP). All Phase 2 complete. |
+| 0.0    | R_screen → B1 C (27). R_prod → A1 AdamW@I (10). R_abl → A3 K-curve A0 (9). |
+| 0.5    | R_abl finishes A3 A0. Run **canonical-coefficient hash check** before A2 (see pre-launch step 4). If pass → A2 (4 cells, 0.22 d). If approximate → rerun affected NS-policy cells before top-up. |
+| 0.55   | R_screen finishes B1 C → starts B1 D. |
+| 0.72   | R_abl finishes A2 (top-up case). Idle. |
+| 1.10   | R_screen finishes B1 D → starts B1 E. |
+| 1.25   | R_prod finishes A1 → starts A3 K-curve I (9 cells, 1.46 d). |
+| 1.65   | R_screen finishes B1 E → starts B1 H' (48 cells, 0.65 d). |
+| 2.30   | R_screen finishes B1 H' → starts B1 H' Muon baseline (9 cells, 0.09 d). |
+| 2.39   | R_screen finishes H' Muon. **Read B1 W&B; declare (no_rope_winner, partial_rope_winner).** |
+| 2.39   | R_screen → B2-no-RoPE confirm (10 cells, override no_rope_policy + best-LR per rung). |
+| 2.53   | R_screen → B2-partial-RoPE confirm (5 cells, override partial_rope_policy + H' best LR). |
+| 2.60   | R_screen finishes B2. **MILESTONE: Phase B closed; v2.1 winner tuple declared.** |
+| 2.60   | R_screen → C1 pair_policy (45 cells, 1.83 d). |
+| 2.71   | R_prod finishes A3 K-curve I. R_prod **IDLE** (waiting on C). |
+| 4.43   | R_screen finishes C1. **MILESTONE: Phase C closed; MoE pair_policy default declared.** |
+| 4.43   | R_prod → D1 O_mla (45 cells, with B-winners + C-winner baked in via `--override`; 6.6 d). |
+| 11.03  | R_prod finishes D1. **MILESTONE: D-gate decision.** delta = Muon − Coupled at own-best LR per optimizer. Commission iff delta_p50 > 1.5 × pooled_seed_std AND bootstrap CI direction stable. |
+| 11.03+ | If D-positive: R_prod → E1 350M MLA (16.9 d); R_screen → D3 paired LoRA-rank (1.22 d); R_abl → D4 P_factff (0.65 d). |
+| 27.93  | E1 finishes (if commissioned). Phase 2.1 complete. |
 
-### Phase-2 dependencies
+### Phase-2.1 dependencies
 
-- **S1 → {S3, S2, A1, B1, stretch}** — the winning NS policy backfills the
-  `optimizer.ns_coefficients` fixed value for these sweeps. In-flight
-  Bernstein cells from S2 remain valid as a "Bernstein baseline" half-grid;
-  remaining cells are re-launched with the winner.
-- **O_mla S2 → 350M stretch** — gating rule: at T+5.6 d, read out the
-  bootstrap CI on the median val-loss gap at the best LR per optimizer;
-  commission stretch only if `gap_p50 > 1.5 × pooled_seed_std`. If gap is
-  unresolved, drop the 30 stretch cells (saves ~3.75–7.5 R_prod rig-days).
-- **A3** is independent — runs in parallel with everything else.
+- **A independent**: A1 (R_prod), A2 / A3 (R_abl) run on their own rigs.
+- **B → D1**: D1 launches with `qk_coupling.no_rope_policy = <B no-RoPE winner>`,
+  `qk_coupling.partial_rope_policy = <B partial-RoPE winner>`. Cannot launch
+  before T = 2.60.
+- **C → D1**: D1 launches with `pair_policy = <C winner>`. Cannot launch
+  before T = 4.43.
+- **D1 launch gate**: `T_D1_launch = max(R_prod free, Phase B done, Phase C done) = max(2.71, 2.60, 4.43) = 4.43`.
+- **D-gate**: at T = 11.03, commission E1 + D3 + D4 iff `delta_p50 > 1.5 × pooled_seed_std`
+  with stable bootstrap CI sign. Otherwise stop; headline reframes per
+  `suggestion.md §0`.
 
-### Pre-launch hygiene (Phase 2 specific)
+### Pre-launch hygiene (Phase 2.1 specific)
 
-1. `git pull` to pick up the Phase-2 code: `optim/ns_coefficients.py`, the
-   MLA layer in `model/attention.py`, the `FactorizedMLP` in `model/mlp.py`,
-   the `pair_factor_ratio` probe in `probes/`, the new ladder/sweep YAMLs.
-2. Update `scripts/check_progress.sh` `RIGS` array to add the new Phase-2
-   results dirs.
-3. **Tests on the cluster** before launch: `uv run pytest tests/test_ns_coefficients.py tests/test_lr_prefactor.py tests/test_ns_gram_form.py tests/test_mla_forward_and_pairs.py tests/test_factorized_mlp_pair.py tests/test_phase2_ladder_configs_load.py tests/test_pair_factor_ratio_probe.py` — local dev box lacks cudnn so these were syntax-checked only.
-4. Replace `optimizer.ns_coefficients: bernstein` in S3, S2, A1, B1, and the
-   350M-stretch sweep YAMLs with the S1 winner before re-launch at T+1.5d.
-   Convention: keep Bernstein as the committed default so the YAML survives
-   resume semantics if S1 names Bernstein the winner.
-5. **Polar Express / Cesista coefficient tables are approximate** in
-   `optim/ns_coefficients.py` (see module docstring). Before the headline
-   publication run, patch in the canonical values from the published
-   supplements / NVIDIA `emerging-optimizers` reference.
+1. `git pull` for the Phase-2.1 code: `optim/coupled_muon.py` `qk_coupling`
+   dispatch (3-key dict), `optim/factory.py` `pair_policy` enum,
+   `configs/base.yaml` defaults (Q-K policy preserves Phase-1 bitwise),
+   `configs/ladder/H_prime_partial_rope.yaml` (new rung), new tests.
+2. Run **all** new and affected tests on the cluster:
+   ```
+   uv run pytest tests/test_qk_coupling_dispatch.py \
+                 tests/test_pair_policy_routing.py \
+                 tests/test_partial_rope.py \
+                 tests/test_phase2_ladder_configs_load.py \
+                 tests/test_optimizer_pairs.py \
+                 tests/test_pair_factor_ratio_probe.py \
+                 tests/test_coupled_zero_equals_muon.py \
+                 tests/test_ns_coefficients.py \
+                 tests/test_mla_forward_and_pairs.py \
+                 tests/test_factorized_mlp_pair.py -x
+   ```
+   The three load-bearing correctness gates:
+   - `test_full_rope_qk_policy_invariance` (preserves A0/B/G/H anchors)
+   - `test_current_flat2d_fallback_matches_legacy_learned_pos` (preserves C/D
+     negative control)
+   - `test_nonfull_qk_policy_does_not_change_vo_routing` (Phase B is
+     Q-K-only)
+3. Update `scripts/check_progress.sh` `RIGS` array with the new
+   `phase2.1-rig*-*` paths.
+4. **NS-policy canonical-coefficient hash check (before A2)**: confirm via
+   W&B configs / artifact hashes that the existing 33 Phase-2 S1 cells used
+   canonical Polar-Express and Cesista coefficient tables (NVIDIA
+   `emerging-optimizers` reference). If approximate, rerun the affected
+   cells before the A2 top-up — do NOT mix coefficient generations within
+   a single grid.
+5. **Sign-convention sanity (before D-gate)**: scripts / notebooks computing
+   the D-gate must use `delta = Muon − Coupled` (positive ⇒ Coupled wins).
+   Part II tables use `Coupled − Muon`; numbers must be negated when imported.
+6. **Smoke configs** (`configs/smoke/*.yaml`) override
+   `pair_factor_ratio_interval_tokens: 0` so the new base.yaml default does
+   not add cost to smoke runs. Verify these overrides still load post-`git pull`.
+7. **Phase-B B1 → B2 launch coupling**: at T = 2.39, query W&B for the
+   no_rope_winner and partial_rope_winner. Use `--override` at B2 launch to
+   bake them in. The same overrides go into the D1 launch at T = 4.43 plus
+   the C1 pair_policy winner.

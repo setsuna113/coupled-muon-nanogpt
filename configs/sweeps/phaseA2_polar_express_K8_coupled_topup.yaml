@@ -1,0 +1,24 @@
+# Phase-2.1 A2 — defensive top-up for the missing Polar-Express K=8 Coupled
+# row in the Phase-2 S1 grid (ns_coeff_K_sweep.yaml). 2 cells = 1 policy ×
+# 1 K × 1 optimizer × 2 seeds.
+#
+# CONDITIONAL on canonical-coefficient hash check (DISPATCH.md Phase 2.1
+# pre-launch step 4): if the existing S1 cells used approximate Polar-Express
+# tables, rerun those cells before this top-up — do NOT mix coefficient
+# generations within one grid.
+#
+# Lives on R_abl (2×H200), ~1.3 h/cell, ~0.11 R_abl days.
+base: configs/ladder/A0_llama60m.yaml
+tie:
+  - [optimizer.coupled_steps, optimizer.ns_steps]
+grid:
+  optimizer.coupled_steps: [8]
+  optimizer.ns_steps:      [8]
+  seed: [0, 1]
+fixed:
+  optimizer.type: coupled_muon_v2
+  optimizer.lr: 3.0e-3
+  optimizer.ns_coefficients: polar_express
+  optimizer.ns_gram_form: false
+  run.wandb_project: coupled-muon-ns-policy
+  run.wandb_group: "${name}/phase2.1_a2_polar_express_k8_coupled"

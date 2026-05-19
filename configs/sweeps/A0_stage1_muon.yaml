@@ -1,3 +1,4 @@
+# status: archive-stage1 — kept on disk for reproduction reference; not in active dispatch.
 # Stage 1 reproduction (experiment.md): A0 LLaMA-60M-class baseline with the
 # Muon family. 5 seeds × 5 LRs × 2 optimizers = 50 runs.
 #

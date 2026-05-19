@@ -1,3 +1,6 @@
+# status: completed-25-of-25 — Phase 2.1 does NOT include a Phase-A1' top-up.
+# The I' AdamW anchor was finished at 25/25 cells (5 seeds × 5 LRs); only the
+# I anchor (seeds 0-2) is incomplete and topped up by adamw_equalization_I.yaml.
 # Stage 3 — AdamW anchor on rung I' (gate-omission control).
 # Companion to lr_grid_moe_adamw_I.yaml: closes the cross-optimizer symmetry
 # across the c.2 gate-omission test. Without this anchor, the I-vs-I' comparison

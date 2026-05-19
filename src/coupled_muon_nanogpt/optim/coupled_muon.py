@@ -271,6 +271,28 @@ class CoupledMuon_v2(torch.optim.Optimizer):
         ns_coefficients: str = "bernstein",
         ns_gram_form: bool = False,
         lr_prefactor: str = "moonlight",
+        # Phase-2.1 Q-K policy interface (experiment.md d.7.3). Three keys:
+        #   full_rope: legacy_rope2d | off
+        #     Controls Q-K branch when rope_status=="full". Default
+        #     ``legacy_rope2d`` dispatches to the unmodified Phase-1 path
+        #     (preserves A0/B/G/H bitwise numerics). ``off`` demotes Q-K to
+        #     plain Muon (explicit ablation; review v3 §"explicit-off").
+        #   no_rope_policy: current_flat2d_fallback | qk_off |
+        #                   headwise_no_rope    (partial_rope_split: INVALID)
+        #     Controls Q-K branch when rope_status=="none" (learned-pos).
+        #   partial_rope_policy: current_flat2d_fallback | qk_off |
+        #                       headwise_no_rope | partial_rope_split
+        #     Controls Q-K branch when rope_status=="partial".
+        # ``rope_status`` and ``rotary_dim`` are computed by the factory and
+        # passed in; ``rope_status`` is one of {"full", "partial", "none"}.
+        # V-O routing under rope_status in {partial, none} ALWAYS goes to the
+        # legacy flat-2D path regardless of qk_coupling choice (hard rule;
+        # review v3.4) — Phase B is Q-K-only.
+        qk_coupling_full_rope: str = "legacy_rope2d",
+        qk_coupling_no_rope_policy: str = "current_flat2d_fallback",
+        qk_coupling_partial_rope_policy: str = "current_flat2d_fallback",
+        rope_status: str = "full",
+        rotary_dim: int | None = None,
     ):
         coupled_pairs = coupled_pairs or []
         muon_params = muon_params or []
@@ -317,6 +339,55 @@ class CoupledMuon_v2(torch.optim.Optimizer):
         self.ns_coefficients_policy = str(ns_coefficients).lower()
         self.ns_gram_form = bool(ns_gram_form)
         self.lr_prefactor = str(lr_prefactor).lower()
+
+        # Phase-2.1 Q-K policy bookkeeping.
+        self.rope_status = str(rope_status).lower()
+        if self.rope_status not in ("full", "partial", "none"):
+            raise ValueError(
+                f"Unknown rope_status={self.rope_status!r}. "
+                f"Expected one of: full | partial | none."
+            )
+        self.qk_coupling_full_rope = str(qk_coupling_full_rope).lower()
+        if self.qk_coupling_full_rope not in ("legacy_rope2d", "off"):
+            raise ValueError(
+                f"Unknown qk_coupling.full_rope={self.qk_coupling_full_rope!r}. "
+                f"Expected one of: legacy_rope2d | off."
+            )
+        self.qk_coupling_no_rope_policy = str(qk_coupling_no_rope_policy).lower()
+        _no_rope_valid = ("current_flat2d_fallback", "qk_off", "headwise_no_rope")
+        if self.qk_coupling_no_rope_policy not in _no_rope_valid:
+            raise ValueError(
+                f"Unknown qk_coupling.no_rope_policy={self.qk_coupling_no_rope_policy!r}. "
+                f"Expected one of: {' | '.join(_no_rope_valid)}. "
+                f"(partial_rope_split is INVALID for rope_status=none.)"
+            )
+        self.qk_coupling_partial_rope_policy = str(qk_coupling_partial_rope_policy).lower()
+        _partial_rope_valid = (
+            "current_flat2d_fallback", "qk_off", "headwise_no_rope", "partial_rope_split",
+        )
+        if self.qk_coupling_partial_rope_policy not in _partial_rope_valid:
+            raise ValueError(
+                f"Unknown qk_coupling.partial_rope_policy={self.qk_coupling_partial_rope_policy!r}. "
+                f"Expected one of: {' | '.join(_partial_rope_valid)}."
+            )
+        # Hard rule (review v3.4): V-O routing under rope_status in {partial,
+        # none} ALWAYS uses the legacy flat-2D path. Internally derive a V-O
+        # specific multi-head flag so Phase B sweeps that set use_multi_head=true
+        # do not accidentally promote V-O to per-head reshape under non-full-RoPE.
+        self._use_multi_head_vo = bool(use_multi_head) and self.rope_status == "full"
+        self.rotary_dim = rotary_dim
+        # partial_rope_policy=partial_rope_split is INERT under rope_status
+        # in {full, none} — the dispatch never reaches it. Only validate
+        # rotary_dim when it will actually be used (rope_status=partial).
+        if (
+            self.rope_status == "partial"
+            and self.qk_coupling_partial_rope_policy == "partial_rope_split"
+        ):
+            if self.rotary_dim is None or self.rotary_dim <= 0:
+                raise ValueError(
+                    "partial_rope_split requires rotary_dim > 0 (factory must "
+                    "thread it from rope_partial_frac × head_dim)."
+                )
 
         if self.ns_coefficients_policy == "bernstein":
             self._coeffs_stage1 = None
@@ -409,6 +480,187 @@ class CoupledMuon_v2(torch.optim.Optimizer):
             )
         return lr * adjusted_ratio
 
+    # ------------------------------------------------------------------
+    # Phase-2.1 Q-K coupling helpers.
+    # `is_qk=True` pairs dispatch through `_qk_stage1_dispatch`, which returns
+    # the post-stage-1 iterates (u_A_c, u_B_c). For `current_flat2d_fallback`,
+    # `qk_off`, `legacy_rope2d`, and `off` the implementations dispatch to the
+    # EXACT existing kernels so the legacy code paths are reused bit-for-bit
+    # (review v2.5 / v3.8). `headwise_no_rope` and `partial_rope_split` are
+    # new code paths gated on the corresponding policy values.
+    # ------------------------------------------------------------------
+    def _qk_legacy_rope2d_stage1(self, g_A_eff, g_B_eff, param_A, param_B, state_A, state_B, n_heads):
+        """Legacy Phase-1 RoPE-2D-block multi-head coupled stage-1. Reproduces
+        the pre-refactor branch at coupled_muon.py:470-509 unchanged.
+        """
+        HD, I = param_A.shape
+        HD_B, I_B = param_B.shape
+        head_dim = HD_B // n_heads
+        if HD == HD_B:
+            g_A_reshaped = g_A_eff.view(state_A["num_heads"], 2, head_dim//2, I).permute(0, 2, 3, 1).contiguous()
+            g_B_reshaped = g_B_eff.view(state_B["num_heads"], 2, head_dim//2, I).permute(0, 2, 1, 3).contiguous()
+            p_A_reshaped = param_A.data.view(state_A["num_heads"], 2, head_dim//2, I).permute(0, 2, 3, 1).contiguous()
+            p_B_reshaped = param_B.data.view(state_B["num_heads"], 2, head_dim//2, I).permute(0, 2, 1, 3).contiguous()
+            u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+            u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+            u_A_c = u_A_c.permute(0, 3, 1, 2).contiguous().reshape(HD, I)
+            u_B_c = u_B_c.permute(0, 2, 1, 3).contiguous().reshape(HD_B, I_B)
+            return u_A_c, u_B_c
+        # GQA broadcast cases (preserved verbatim from legacy code).
+        if HD > HD_B:
+            n_heads_group = HD // HD_B
+            g_A_reshaped = g_A_eff.view(n_heads_group, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 4, 2).contiguous()
+            g_B_reshaped = g_B_eff.view(1, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 2, 4).contiguous()
+            p_A_reshaped = param_A.data.view(n_heads_group, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 4, 2).contiguous()
+            p_B_reshaped = param_B.data.view(1, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 2, 4).contiguous()
+            u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+            u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+            u_A_c = u_A_c.permute(0, 1, 4, 2, 3).contiguous().reshape(HD, I)
+            u_B_c = u_B_c.mean(dim=0).permute(0, 2, 1, 3).contiguous().reshape(HD_B, I_B)
+            return u_A_c, u_B_c
+        # HD < HD_B
+        n_heads_group = HD_B // HD
+        g_A_reshaped = g_A_eff.view(1, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 4, 2).contiguous()
+        g_B_reshaped = g_B_eff.view(n_heads_group, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 2, 4).contiguous()
+        p_A_reshaped = param_A.data.view(1, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 4, 2).contiguous()
+        p_B_reshaped = param_B.data.view(n_heads_group, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 2, 4).contiguous()
+        u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+        u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+        u_A_c = u_A_c.mean(dim=0).permute(0, 3, 1, 2).contiguous().reshape(HD, I)
+        u_B_c = u_B_c.permute(0, 1, 3, 2, 4).contiguous().reshape(HD_B, I_B)
+        return u_A_c, u_B_c
+
+    def _qk_flat2d_stage1(self, g_A_eff, g_B_eff, param_A, param_B):
+        """Legacy flat-2D coupling (no head reshape). Reproduces the pre-refactor
+        fallback at coupled_muon.py:527-528 unchanged — load-bearing for the
+        invariant `current_flat2d_fallback` bitwise-equals legacy on C/D/E.
+        """
+        u_A_c = coupled_newtonschulz5_A(g_A_eff, param_B.data, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+        u_B_c = coupled_newtonschulz5_B(g_B_eff, param_A.data, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+        return u_A_c, u_B_c
+
+    def _qk_qk_off_stage1(self, g_A_eff, g_B_eff, ns_steps):
+        """Demote Q-K to plain Muon. To make the final write to Q,K
+        BITWISE-IDENTICAL to a plain-Muon-step on the same gradients, we
+        return the raw gradients here when ``final_polish=True`` and let the
+        outer NS5 pass do all the orthogonalisation work. When
+        ``final_polish=False``, we polish here directly (the outer code
+        would otherwise apply no polish). Total NS work = ``ns_steps`` in
+        both cases (one pass), matching the plain-Muon path."""
+        if self.final_polish:
+            return g_A_eff, g_B_eff
+        u_A_c = zeropower_via_newtonschulz5(
+            g_A_eff, steps=ns_steps, dtype=self.ns_dtype,
+            coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form,
+        )
+        u_B_c = zeropower_via_newtonschulz5(
+            g_B_eff, steps=ns_steps, dtype=self.ns_dtype,
+            coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form,
+        )
+        return u_A_c, u_B_c
+
+    def _qk_headwise_no_rope_stage1(self, g_A_eff, g_B_eff, param_A, param_B, state_A, state_B):
+        """Per-head 3-D coupling without RoPE 2-D rotation-pair split.
+
+        Reshape Q, K as (n_heads, head_dim, in_features); the partner-aware
+        kernel sees the per-head Q·K^T product geometry. Only the MHA case
+        (n_heads_A == n_heads_B) is implemented; GQA falls back to
+        ``coupled_newtonschulz5_A``/``_B`` flat-2D path for now.
+        """
+        HD, I = param_A.shape
+        HD_B, I_B = param_B.shape
+        n_heads_A = state_A["num_heads"]
+        n_heads_B = state_B["num_heads"]
+        if n_heads_A != n_heads_B or HD != HD_B:
+            # GQA / asymmetric — fall back to flat-2D coupling (safe default).
+            return self._qk_flat2d_stage1(g_A_eff, g_B_eff, param_A, param_B)
+        head_dim = HD // n_heads_A
+        g_A_3d = g_A_eff.view(n_heads_A, head_dim, I).contiguous()
+        g_B_3d = g_B_eff.view(n_heads_B, head_dim, I).contiguous()
+        p_A_3d = param_A.data.view(n_heads_A, head_dim, I).contiguous()
+        p_B_3d = param_B.data.view(n_heads_B, head_dim, I).contiguous()
+        # Partners are transposed so X @ B yields the (head_dim, head_dim) per-head product.
+        p_A_3d_T = p_A_3d.transpose(-1, -2).contiguous()
+        p_B_3d_T = p_B_3d.transpose(-1, -2).contiguous()
+        u_A_3d = coupled_newtonschulz5_A(g_A_3d, p_B_3d_T, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+        u_B_3d = coupled_newtonschulz5_A(g_B_3d, p_A_3d_T, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+        u_A_c = u_A_3d.reshape(HD, I)
+        u_B_c = u_B_3d.reshape(HD_B, I_B)
+        return u_A_c, u_B_c
+
+    def _qk_partial_rope_split_stage1(self, g_A_eff, g_B_eff, param_A, param_B, state_A, state_B, n_heads, ns_steps):
+        """Split per-head head_dim into RoPE'd [0:rotary_dim] and non-RoPE
+        [rotary_dim:] slices. RoPE'd slice → legacy 2-D rotation-pair coupled
+        NS. Non-RoPE slice → plain Muon (no coupling on the non-RoPE channels;
+        the safe choice per review v3 §"partial_rope_split semantics").
+        """
+        HD, I = param_A.shape
+        HD_B, I_B = param_B.shape
+        n_heads_A = state_A["num_heads"]
+        n_heads_B = state_B["num_heads"]
+        if n_heads_A != n_heads_B or HD != HD_B:
+            # GQA not supported in partial_rope_split; fall back to current_flat2d.
+            return self._qk_flat2d_stage1(g_A_eff, g_B_eff, param_A, param_B)
+        head_dim = HD // n_heads_A
+        rope_dim = int(self.rotary_dim) if self.rotary_dim is not None else head_dim
+        rope_dim = max(2, min(head_dim, rope_dim & ~1))  # even, in [2, head_dim]
+        non_rope_dim = head_dim - rope_dim
+        # View per-head head_dim.
+        g_A_view = g_A_eff.view(n_heads_A, head_dim, I)
+        g_B_view = g_B_eff.view(n_heads_B, head_dim, I)
+        p_A_view = param_A.data.view(n_heads_A, head_dim, I)
+        p_B_view = param_B.data.view(n_heads_B, head_dim, I)
+        # RoPE slice [0:rope_dim] — legacy 2-D rotation-pair block coupling.
+        g_A_rope = g_A_view[:, :rope_dim, :].reshape(n_heads_A, 2, rope_dim // 2, I).permute(0, 2, 3, 1).contiguous()
+        g_B_rope = g_B_view[:, :rope_dim, :].reshape(n_heads_B, 2, rope_dim // 2, I).permute(0, 2, 1, 3).contiguous()
+        p_A_rope = p_A_view[:, :rope_dim, :].reshape(n_heads_A, 2, rope_dim // 2, I).permute(0, 2, 3, 1).contiguous()
+        p_B_rope = p_B_view[:, :rope_dim, :].reshape(n_heads_B, 2, rope_dim // 2, I).permute(0, 2, 1, 3).contiguous()
+        u_A_rope_4d = coupled_newtonschulz5_A(g_A_rope, p_B_rope, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+        u_B_rope_4d = coupled_newtonschulz5_B(g_B_rope, p_A_rope, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+        u_A_rope = u_A_rope_4d.permute(0, 3, 1, 2).contiguous().reshape(n_heads_A, rope_dim, I)
+        u_B_rope = u_B_rope_4d.permute(0, 2, 1, 3).contiguous().reshape(n_heads_B, rope_dim, I)
+        if non_rope_dim == 0:
+            u_A_3d = u_A_rope
+            u_B_3d = u_B_rope
+        else:
+            # Non-RoPE slice [rope_dim:] — plain Muon (no coupling).
+            g_A_norope = g_A_view[:, rope_dim:, :].reshape(n_heads_A * non_rope_dim, I).contiguous()
+            g_B_norope = g_B_view[:, rope_dim:, :].reshape(n_heads_B * non_rope_dim, I).contiguous()
+            steps = self.coupled_steps + ns_steps if self.final_polish else self.coupled_steps
+            u_A_norope_flat = zeropower_via_newtonschulz5(g_A_norope, steps=steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form)
+            u_B_norope_flat = zeropower_via_newtonschulz5(g_B_norope, steps=steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage2, gram_form=self.ns_gram_form)
+            u_A_norope = u_A_norope_flat.view(n_heads_A, non_rope_dim, I)
+            u_B_norope = u_B_norope_flat.view(n_heads_B, non_rope_dim, I)
+            u_A_3d = torch.cat([u_A_rope, u_A_norope], dim=1)
+            u_B_3d = torch.cat([u_B_rope, u_B_norope], dim=1)
+        u_A_c = u_A_3d.reshape(HD, I)
+        u_B_c = u_B_3d.reshape(HD_B, I_B)
+        return u_A_c, u_B_c
+
+    def _qk_stage1_dispatch(self, g_A_eff, g_B_eff, param_A, param_B, state_A, state_B, n_heads, ns_steps):
+        """Dispatch for is_qk=True pairs based on (rope_status, qk_coupling)."""
+        if self.rope_status == "full":
+            if self.qk_coupling_full_rope == "legacy_rope2d":
+                return self._qk_legacy_rope2d_stage1(g_A_eff, g_B_eff, param_A, param_B, state_A, state_B, n_heads)
+            elif self.qk_coupling_full_rope == "off":
+                return self._qk_qk_off_stage1(g_A_eff, g_B_eff, ns_steps)
+            else:
+                raise ValueError(f"Unreachable: qk_coupling.full_rope={self.qk_coupling_full_rope!r}")
+        # rope_status in {"partial", "none"}
+        if self.rope_status == "partial":
+            policy = self.qk_coupling_partial_rope_policy
+        else:
+            policy = self.qk_coupling_no_rope_policy
+        if policy == "current_flat2d_fallback":
+            return self._qk_flat2d_stage1(g_A_eff, g_B_eff, param_A, param_B)
+        if policy == "qk_off":
+            return self._qk_qk_off_stage1(g_A_eff, g_B_eff, ns_steps)
+        if policy == "headwise_no_rope":
+            return self._qk_headwise_no_rope_stage1(g_A_eff, g_B_eff, param_A, param_B, state_A, state_B)
+        if policy == "partial_rope_split":
+            return self._qk_partial_rope_split_stage1(g_A_eff, g_B_eff, param_A, param_B, state_A, state_B, n_heads, ns_steps)
+        raise ValueError(f"Unreachable: qk policy={policy!r} for rope_status={self.rope_status!r}")
+
     def step(self, closure=None):
         loss = None
         if closure is not None:
@@ -466,63 +718,33 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                 # still pre-divides by ‖XB‖_F (lines 56, 93), producing a degraded
                 # update that is *neither* coupled-NS nor plain Muon.
                 if self.coupled_steps > 0 and self.enable_coupled:
-                    if self.use_multi_head and param_A.shape[1] % state_A["num_heads"] == 0 and param_B.shape[0] % state_B["num_heads"] == 0:
-                        if is_qk:
-                            HD, I = param_A.shape
-                            HD_B, I_B = param_B.shape
-                            head_dim = HD_B // n_heads
-                            if HD == HD_B:
-                                g_A_reshaped = g_A_eff.view(state_A["num_heads"], 2, head_dim//2, I).permute(0, 2, 3, 1).contiguous()
-                                g_B_reshaped = g_B_eff.view(state_B["num_heads"], 2, head_dim//2, I).permute(0, 2, 1, 3).contiguous()
-                                p_A_reshaped = param_A.data.view(state_A["num_heads"], 2, head_dim//2, I).permute(0, 2, 3, 1).contiguous()
-                                p_B_reshaped = param_B.data.view(state_B["num_heads"], 2, head_dim//2, I).permute(0, 2, 1, 3).contiguous()
+                    if is_qk and self.use_multi_head:
+                        # Phase-2.1: dispatch on (rope_status, qk_coupling).
+                        # When rope_status=="full" + full_rope=="legacy_rope2d",
+                        # this dispatches bit-for-bit to the legacy Phase-1
+                        # 2-D rotation-pair multi-head path.
+                        u_A_c, u_B_c = self._qk_stage1_dispatch(
+                            g_A_eff, g_B_eff, param_A, param_B, state_A, state_B, n_heads, ns_steps,
+                        )
+                    elif (not is_qk) and self._use_multi_head_vo and param_A.shape[1] % state_A["num_heads"] == 0 and param_B.shape[0] % state_B["num_heads"] == 0:
+                        # V-O / FFN per-head reshape — only active under
+                        # rope_status=="full" (hard rule v3.4: V-O routing under
+                        # non-full-RoPE always falls through to flat-2D).
+                        O, HD = param_A.shape
+                        HD_B, I = param_B.shape
+                        assert HD == HD_B
+                        head_dim = HD // state_A["num_heads"]
 
-                                u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
-                                u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+                        g_A_reshaped = g_A_eff.view(O, state_A["num_heads"], head_dim).permute(1, 0, 2)
+                        g_B_reshaped = g_B_eff.view(state_B["num_heads"], head_dim, I)
+                        p_A_reshaped = param_A.data.view(O, state_A["num_heads"], head_dim).permute(1, 0, 2)
+                        p_B_reshaped = param_B.data.view(state_B["num_heads"], head_dim, I)
 
-                                u_A_c = u_A_c.permute(0, 3, 1, 2).contiguous().reshape(HD, I)
-                                u_B_c = u_B_c.permute(0, 2, 1, 3).contiguous().reshape(HD_B, I_B)
-                            else:
-                                if HD > HD_B:
-                                    n_heads_group = HD // HD_B
-                                    g_A_reshaped = g_A_eff.view(n_heads_group, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 4, 2).contiguous()
-                                    g_B_reshaped = g_B_eff.view(1, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 2, 4).contiguous()
-                                    p_A_reshaped = param_A.data.view(n_heads_group, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 4, 2).contiguous()
-                                    p_B_reshaped = param_B.data.view(1, state_B["num_heads"], 2, head_dim//2, I).permute(0, 1, 3, 2, 4).contiguous()
+                        u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
+                        u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
 
-                                    u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
-                                    u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
-
-                                    u_A_c = u_A_c.permute(0, 1, 4, 2, 3).contiguous().reshape(HD, I)
-                                    u_B_c = u_B_c.mean(dim=0).permute(0, 2, 1, 3).contiguous().reshape(HD_B, I_B)
-                                else:
-                                    n_heads_group = HD_B // HD
-                                    g_A_reshaped = g_A_eff.view(1, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 4, 2).contiguous()
-                                    g_B_reshaped = g_B_eff.view(n_heads_group, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 2, 4).contiguous()
-                                    p_A_reshaped = param_A.data.view(1, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 4, 2).contiguous()
-                                    p_B_reshaped = param_B.data.view(n_heads_group, state_B["num_heads"] // n_heads_group, 2, head_dim // 2, I).permute(0, 1, 3, 2, 4).contiguous()
-
-                                    u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
-                                    u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
-
-                                    u_A_c = u_A_c.mean(dim=0).permute(0, 3, 1, 2).contiguous().reshape(HD, I)
-                                    u_B_c = u_B_c.permute(0, 1, 3, 2, 4).contiguous().reshape(HD_B, I_B)
-                        else:
-                            O, HD = param_A.shape
-                            HD_B, I = param_B.shape
-                            assert HD == HD_B
-                            head_dim = HD // state_A["num_heads"]
-
-                            g_A_reshaped = g_A_eff.view(O, state_A["num_heads"], head_dim).permute(1, 0, 2)
-                            g_B_reshaped = g_B_eff.view(state_B["num_heads"], head_dim, I)
-                            p_A_reshaped = param_A.data.view(O, state_A["num_heads"], head_dim).permute(1, 0, 2)
-                            p_B_reshaped = param_B.data.view(state_B["num_heads"], head_dim, I)
-
-                            u_A_c = coupled_newtonschulz5_A(g_A_reshaped, p_B_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
-                            u_B_c = coupled_newtonschulz5_B(g_B_reshaped, p_A_reshaped, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
-
-                            u_A_c = u_A_c.permute(1, 0, 2).reshape(O, HD)
-                            u_B_c = u_B_c.reshape(HD_B, I)
+                        u_A_c = u_A_c.permute(1, 0, 2).reshape(O, HD)
+                        u_B_c = u_B_c.reshape(HD_B, I)
                     else:
                         u_A_c = coupled_newtonschulz5_A(g_A_eff, param_B.data, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
                         u_B_c = coupled_newtonschulz5_B(g_B_eff, param_A.data, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)

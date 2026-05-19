@@ -430,7 +430,204 @@ Section a.2.1 frames stage 2 as enforcing `‖U_A‖_spec ≈ 1`. Under the rigo
 
 ---
 
-## (d.7) Phase 2 — factored-architecture rungs (new rungs and ablations)
+## (d.7) Phase 2.1 — gated tree (supersedes Phase 2)
+
+Phase 2.1 is a five-phase gated tree (A → B → C → D → E). Phase B is the
+highest-priority algorithmic fix: Part I dense evidence localized the C/D
+regression to a known silent fallback — `factory.py:367–380` auto-disabled
+`use_multi_head` whenever `pos_emb.type != rope` or `rope_partial_frac < 1.0`,
+producing flat-2D Q-K coupling that hurts on learned-pos rungs. Phase 2.1
+replaces the warn-and-disable with a `qk_coupling` three-flag dispatcher
+(`full_rope`, `no_rope_policy`, `partial_rope_policy`) and sweeps the four
+non-full-RoPE policies at C/D/E/H' to pick the v2.1 default tuple.
+
+Phase C re-runs the MoE pair_policy localization at production rung I with
+own-best-LR per policy (3 LRs × 5 seeds × 3 policies = 45 cells; the
+Phase-2 single-LR pair_policy YAMLs are superseded). Phase D launches O_mla
+only after BOTH the Phase-B winner tuple AND the Phase-C MoE default are
+declared. Phase E is gated on Phase-D positive.
+
+The pre-existing Phase-2 plan (S1/S2/S3/A1/A2/A3/B1/B3 + 350M stretch) is
+reorganized into this tree rather than discarded; superseded YAMLs stay on
+disk with a `status:` comment-header. The active sweep list is in
+`DISPATCH.md` "Active dispatch (Phase 2.1)".
+
+### d.7.1 Phase tree
+
+```
+Phase A — Evidence cleanup
+  A1     Finish AdamW @ I anchor (seeds 3,4 × 5 LRs).
+         NO A1' — I' anchor is complete 25/25.
+  A2     NS-policy defensive top-up (Polar-Express K=8 Coupled +
+         Cesista K=8 paired). CONDITIONAL on canonical-coefficient
+         artifact-hash match of existing S1 cells.
+  A3     Minimal K-curve coupled_steps ∈ {1, 2, 4} at A0 + I.
+  A4     Lock statistical protocol: own-best LR, paired seeds, no imputation.
+
+Phase B — qk_coupling repair    (HIGHEST PRIORITY)
+  B0     Add optimizer.qk_coupling.{full_rope, no_rope_policy, partial_rope_policy}.
+  B1     Sweep:
+          - C/D/E × 3 no_rope_policy values × 3 LRs × 3 seeds = 27 each
+          - H' × 4 partial_rope_policy values × 4 LRs × 3 seeds = 48
+          - H' Muon mini-baseline × 3 LRs × 3 seeds = 9
+  B2     5-seed confirmation at winners:
+          - B2-no-RoPE:  C, D × no_rope_winner × 5 seeds × best LR per rung
+          - B2-partial-RoPE: H' × partial_rope_winner × 5 seeds × best LR
+  B3     Decision: v2.1 (no_rope_winner, partial_rope_winner) tuple.
+
+Phase C — MoE pair_policy localization    (45 cells; own-best LR per policy)
+  C1     pair_policy ∈ {attention_only, ffn_only, all} × 3 LRs × 5 seeds at I.
+  C2     MoE diagnostics on by default (router entropy, load imbalance,
+         attn-logit max, pair_factor_ratio).
+  C3     Decision: MoE pair_policy default for D1.
+
+Phase D — Factored / MLA validation
+  Gates: Phase B winner tuple declared AND Phase C MoE default declared.
+  D1     O_mla cross-optimizer triple — 3 opts × 3 LRs × 5 seeds = 45 cells.
+         Muon/Coupled/AdamW all at 5 paired seeds.
+         qk_coupling tuple AND pair_policy baked in via --override.
+  D2     D-gate: delta = Muon − Coupled (positive ⇒ Coupled wins).
+         Commission D3 / D4 / E1 iff delta_p50 > 1.5 × pooled_seed_std AND
+         bootstrap CI sign stable across percentiles.
+  D3     (conditional) paired LoRA-rank sweep — 30 cells (5 ranks × 2 opts × 3 seeds).
+  D4     (conditional) P_factff imposed-FFN — 12 cells.
+  D5     (deferred Phase 2.5) 3-way MLA coupling (UK, UV, DKV).
+
+Phase E — Scale validation    (gated on D-positive)
+  E1     Z_350m_mla — 30 cells (3 opts × 2 LRs × 5 seeds).
+  E2     Z_350m_dense — REMOVED from active plan.
+```
+
+### d.7.2 Items removed from active plan (kept on disk with status header)
+
+| Item | Disposition |
+|---|---|
+| Full K-curve {1,2,3,5,8,12} | reduced to {1,2,4} (phaseA3) |
+| LR-prefactor sweep | Phase 3 conditional |
+| Unconditional Z_350m_dense | removed |
+| Unconditional Z_350m_mla | conditional on D-positive |
+| Unconditional P_factff | conditional on D-positive |
+| Unpaired LoRA-rank | replaced by paired (phaseD3), conditional on D |
+| final_polish=False exploration | kept as historical evidence; not re-explored |
+| Gram-NS as active experiment | flag stays, Phase 2.5 |
+| L MoE rung (shared expert) | dropped from active plan |
+| M/N MoE rungs | conditional on Phase C |
+| A1' AdamW @ I' top-up | NOT NEEDED (anchor complete 25/25) |
+
+Confirmed out-of-scope (unchanged): KDA / linear-attention, GPT-2 baseline,
+FFN-nonlinearity sweep, sliding-window attention, momentum / Nesterov sweep.
+
+### d.7.3 qk_coupling semantic table
+
+| rope_status | full_rope | no/partial_rope_policy | Q-K behavior |
+|---|---|---|---|
+| `full`    | `legacy_rope2d` | inert | unmodified Phase-1 RoPE-2D-block multi-head coupled NS (bitwise-identical to legacy) |
+| `full`    | `off`           | inert | Q, K → plain Muon NS5 (explicit ablation) |
+| `partial` | inert | `current_flat2d_fallback` | bitwise-identical to pre-refactor flat-2D fallback |
+| `partial` | inert | `qk_off`                  | Q, K → plain Muon NS5 |
+| `partial` | inert | `headwise_no_rope`        | per-head 3-D coupled NS (no RoPE 2-D split) |
+| `partial` | inert | `partial_rope_split`      | RoPE slice [0:rotary_dim] gets legacy 2-D block; non-RoPE slice [rotary_dim:] gets plain Muon |
+| `none`    | inert | `current_flat2d_fallback` | bitwise-identical to legacy flat-2D fallback |
+| `none`    | inert | `qk_off`                  | Q, K → plain Muon NS5 |
+| `none`    | inert | `headwise_no_rope`        | per-head 3-D coupled NS |
+| `none`    | inert | `partial_rope_split`      | INVALID — raises ValueError at factory build |
+
+**Invariant 1 — full-RoPE bitwise**: `rope_status==full + full_rope==legacy_rope2d`
+produces identical Q,K updates regardless of `no_rope_policy` /
+`partial_rope_policy`. Verified by `test_full_rope_qk_policy_invariance`.
+
+**Invariant 2 — current_flat2d_fallback bitwise**: under non-full-RoPE,
+`current_flat2d_fallback` produces identical updates to the legacy
+pre-refactor flat-2D path (verified by
+`test_current_flat2d_fallback_matches_legacy_learned_pos`).
+
+**Invariant 3 — V-O hard rule**: V-O routing under `rope_status ∈ {partial, none}`
+remains legacy flat-2D regardless of `qk_coupling` choice. Phase B is
+Q-K-only. V-O variation requires a separate ablation flag.
+
+**Invariant 4 — MLA pair isolation**: classic `qk_coupling` does NOT govern
+MLA factored pair routing. MLA `(W_UK, W_DKV)` and optional `(W_UQ, W_DQ)`
+are dispatched via `couple_mla`, independent of `qk_coupling` and
+`pair_policy`. `pair_policy=attention_only` disables expert FFN coupling but
+preserves MLA K-side coupling.
+
+### d.7.4 Decision rules
+
+**Phase-B v2.1 winner-tuple selection.** From Phase-B1 W&B readout, pick
+`no_rope_winner` ∈ {current_flat2d_fallback, qk_off, headwise_no_rope} and
+`partial_rope_winner` ∈ {current_flat2d_fallback, qk_off, headwise_no_rope,
+partial_rope_split} satisfying:
+
+1. *no_rope_winner* on C and D: eliminates the large Phase-1 regression vs
+   Muon (mean Coupled–Muon delta within ~1× pooled_seed_std of zero, or
+   favouring Coupled).
+2. *no_rope_winner* on E: no NEW regression vs Muon.
+3. *partial_rope_winner* on H': matches or beats the H' Muon baseline at
+   own-best LR; finite stable training.
+4. A0/B/G/H (full RoPE) full-RoPE invariance test passes (preserves Phase-1
+   anchors).
+
+Tiebreak (smaller extra wall-clock first):
+`qk_off < current_flat2d < headwise_no_rope < partial_rope_split`. If no
+candidate satisfies (1): ship v2.1 with `no_rope_winner = current_flat2d_fallback`
+(status quo) and document non-RoPE Q-K coupling as a known limitation.
+
+**Phase-C MoE pair_policy default selection.**
+
+| Observation | MoE default |
+|---|---|
+| `attention_only ≈ all > ffn_only` | attention_only |
+| `ffn_only ≈ all > attention_only` | ffn_only (or all, cost-aware) |
+| `all > {attn_only, ffn_only} + std` | all (composite) |
+| Inconclusive | all (Phase-1 status quo); document as inconclusive |
+
+**Phase-D D-gate.** delta = Muon − Coupled (positive ⇒ Coupled wins).
+Commission D3 / D4 / E1 iff `delta_p50 > 1.5 × pooled_seed_std` AND
+bootstrap CI sign stable across percentiles. Otherwise: stop; headline
+reframes per suggestion.md §0.
+
+### d.7.5 Diagnostics on by default for Phase B/C/D runs
+
+- `pair_factor_ratio_interval_tokens: 50_000_000` (base.yaml default; smoke
+  YAMLs override to 0).
+- `moe_load_interval_tokens`, `attn_logit_interval_tokens`: parent ladder
+  defaults (50M / 5M for MoE rungs).
+
+### d.7.6 Statistical protocol (A4 lock)
+
+- Own-best LR per (rung, optimizer) — never compare Coupled at Coupled's
+  best LR to Muon at the same LR; compare each at its own grid optimum.
+- Paired seeds across optimizers in every gap report. Bootstrap CIs on the
+  paired-difference distribution.
+- Diverged runs reported with seed + (lr, optimizer) tag; no imputation.
+- Headline cells (D1 best LR, B2 confirmation, C1 winner): 5 seeds.
+- Screening cells (B1 policy sweep, A3 K-curve): 3 seeds.
+
+### d.7.7 New ladder rung
+
+`H_prime_partial_rope` — H with `rope_partial_frac=0.5`. Required for Phase B
+`partial_rope_split`. ~1 h/seed on R_abl, ~3.0 h/seed on R_screen 2-GPU.
+
+### d.7.8 Naming convention
+
+Canonical `pair_policy` values: `attention_only` | `ffn_only` | `all`.
+Avoid `attn_only` as an alias. All YAMLs, code, dashboards use the
+canonical spellings.
+
+### d.7.9 Scope note — MLA scoping (carried from Phase 2)
+
+The MLA implementation in `model/attention.py:MultiLatentAttention` is the
+DeepSeek-V2/V3 design (shared KV down-projection `W_DKV`, per-head
+up-projections `W_UK`/`W_UV`, decoupled-rotary K side `W_KR`, optional
+low-rank Q via `W_DQ`/`W_UQ`). It is **not** DeepSeek-V4, Qwen3-Next,
+Kimi-Linear KDA, etc. — those remain Phase-3 stretch. `W_UV` routes to plain
+Muon because the `processed` set rules out two coupled pairs sharing a
+B-partner; a 3-way (UK, UV, DKV) joint kernel is the Phase 2.5 algorithmic
+improvement if Phase D lands positive.
+
+---
+
+## (d.7-legacy) Phase 2 — factored-architecture rungs (archived; see d.7 Phase 2.1)
 
 Phase 2 expands the bridging ladder along three axes: a **factored-architecture rung (MLA + low-rank Q)** to test CoupledMuon's distinctive claim where it actually bites; a **Newton–Schulz coefficient policy axis** + a **K-curve** to defend every CoupledMuon-vs-Muon delta against the "did a better NS policy close the gap?" attack; and a set of **methodology equalizers** (AdamW seeds × LR matched to Muon-family, pair-policy split at production, LR-prefactor formulas). Plus a **350M MLA scaling rung** to produce a 2-point scaling-trend claim, and an **imposed-FFN-factorization** rung to test whether the gain transfers beyond natively factored architectures.
 

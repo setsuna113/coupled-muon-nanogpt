@@ -1,3 +1,5 @@
+# status: superseded-by-phaseC-pair-policy-lr — Phase 2.1 expands to 3 LRs.
+# This single-LR YAML is kept on disk for reference; not in active dispatch.
 # Phase-2 Tier A1 (2/3) — Pair-selection at production rung I, FFN-only.
 # Couple FFN up-down only; attention pairs (Q-K, V-O) OFF.
 # 5 cells = 1 policy × 5 seeds.

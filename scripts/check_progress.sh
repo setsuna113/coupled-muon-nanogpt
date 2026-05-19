@@ -22,6 +22,24 @@ RIGS=(
   "stage3-rig2H200-adamwIp|$GLOBAL/coupled-muon-stage3-rig2H200-adamw-Iprime/*|15"
   "stage3-rigB-pt3|$GLOBAL/coupled-muon-stage3-rigB-pt3/*|19"
   "d4ablations|$GLOBAL/coupled-muon-d4ablations/*|105"
+  # Phase 2.1 (gated tree; see DISPATCH.md "Active dispatch (Phase 2.1)")
+  "p2.1-rigC-a3kcurveA0|$GLOBAL/phase2.1-rigC-a3-kcurve-a0/*|9"
+  "p2.1-rigC-a2nstop|$GLOBAL/phase2.1-rigC-a2-ns-topup/*|4"
+  "p2.1-rigA-a1adamwI|$GLOBAL/phase2.1-rigA-a1-adamw-I-topup/*|10"
+  "p2.1-rigA-a3kcurveI|$GLOBAL/phase2.1-rigA-a3-kcurve-I/*|9"
+  "p2.1-rigB-bqkC|$GLOBAL/phase2.1-rigB-b-qk-no-rope-C/*|27"
+  "p2.1-rigB-bqkD|$GLOBAL/phase2.1-rigB-b-qk-no-rope-D/*|27"
+  "p2.1-rigB-bqkE|$GLOBAL/phase2.1-rigB-b-qk-no-rope-E/*|27"
+  "p2.1-rigB-bqkHp|$GLOBAL/phase2.1-rigB-b-qk-partial-rope-Hprime/*|48"
+  "p2.1-rigB-bmuonHp|$GLOBAL/phase2.1-rigB-b-muon-baseline-Hprime/*|9"
+  "p2.1-rigB-b2nrope|$GLOBAL/phase2.1-rigB-b2-no-rope-confirm/*|10"
+  "p2.1-rigB-b2prope|$GLOBAL/phase2.1-rigB-b2-partial-rope-confirm/*|5"
+  "p2.1-rigB-cpair|$GLOBAL/phase2.1-rigB-c-pair-policy/*|45"
+  "p2.1-rigA-d1mla|$GLOBAL/phase2.1-rigA-d1-mla/*|45"
+  # Conditional on D1 positive:
+  "p2.1-rigB-d3lora|$GLOBAL/phase2.1-rigB-d3-lora-rank/*|30"
+  "p2.1-rigC-d4factff|$GLOBAL/phase2.1-rigC-d4-factff/*|12"
+  "p2.1-rigA-e1mla350|$GLOBAL/phase2.1-rigA-e1-mla-350m/*|30"
 )
 
 verbose=0

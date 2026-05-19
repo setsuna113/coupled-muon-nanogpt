@@ -1,0 +1,22 @@
+# Phase-2.1 A2 — defensive top-up for the missing Cesista K=8 paired seed
+# in the Phase-2 S1 grid. Original ns_coeff_K_sweep.yaml has seeds [0, 1];
+# Phase 2.1 protocol requires 3 paired seeds for the K=8 row to be reportable.
+#
+# 2 cells = 1 K × 2 optimizers × 1 seed. (Muon + Coupled paired @ seed=2 to
+# complete the paired-seed-2 row.)
+#
+# Lives on R_abl (2×H200), ~1.3 h/cell, ~0.11 R_abl days.
+base: configs/ladder/A0_llama60m.yaml
+tie:
+  - [optimizer.coupled_steps, optimizer.ns_steps]
+grid:
+  optimizer.type: [muon, coupled_muon_v2]
+  optimizer.coupled_steps: [8]
+  optimizer.ns_steps:      [8]
+  seed: [2]
+fixed:
+  optimizer.lr: 3.0e-3
+  optimizer.ns_coefficients: cesista
+  optimizer.ns_gram_form: false
+  run.wandb_project: coupled-muon-ns-policy
+  run.wandb_group: "${name}/phase2.1_a2_cesista_k8_paired_topup"

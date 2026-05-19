@@ -1,3 +1,6 @@
+# status: phase3-conditional — removed from Phase 2.1 active plan. LR-prefactor
+# is a Muon-family scaling axis, not a Coupled-novelty axis. Re-promote only if
+# K-curve (phaseA3) or expert-width axes show scale mismatch.
 # Phase-2 Tier A2 — LR-prefactor formula sweep at A0 (60M-CS dense).
 # Moonlight's `0.2·√max(A,B)` is convention, not derivation
 # (suggestion.md A2 / §206). Cesista/Bernstein argue for `√(d_out/d_in)`.

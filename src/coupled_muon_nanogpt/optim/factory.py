@@ -323,11 +323,59 @@ def build_optimizer(
         )
 
     if opt.type == "coupled_muon_v2":
+        # Phase-2.1: resolve pair_policy enum (Phase C support). When set,
+        # it overrides the couple_qk/vo/updown booleans. Conflict raises
+        # unless `allow_pair_policy_override` is true (review v3 §pair_policy).
+        pair_policy = opt.get("pair_policy", None)
+        pair_policy_str = str(pair_policy).lower() if pair_policy is not None else None
+        if pair_policy_str in ("", "null", "none"):
+            pair_policy_str = None
+        allow_override = bool(opt.get("allow_pair_policy_override", False))
+        if pair_policy_str is not None:
+            _enum_map = {
+                "all":            (True,  True,  True),
+                "attention_only": (True,  True,  False),
+                "ffn_only":       (False, False, True),
+            }
+            if pair_policy_str not in _enum_map:
+                raise ValueError(
+                    f"Unknown optimizer.pair_policy={pair_policy_str!r}. "
+                    f"Expected one of: all | attention_only | ffn_only | null."
+                )
+            cqk_eff, cvo_eff, cud_eff = _enum_map[pair_policy_str]
+            # Detect conflicts with explicit couple_* booleans. opt.couple_*
+            # comes from base.yaml defaults (True/True/True); flag a mismatch
+            # only when the YAML's explicit value disagrees with the enum.
+            for k, want, got in (
+                ("couple_qk",     cqk_eff, bool(opt.couple_qk)),
+                ("couple_vo",     cvo_eff, bool(opt.couple_vo)),
+                ("couple_updown", cud_eff, bool(opt.couple_updown)),
+            ):
+                if want != got:
+                    msg = (
+                        f"optimizer.pair_policy={pair_policy_str!r} implies {k}={want}, "
+                        f"but optimizer.{k}={got} was explicitly set."
+                    )
+                    if allow_override:
+                        warnings.warn(
+                            msg + " Honoring pair_policy (allow_pair_policy_override=true).",
+                            stacklevel=2,
+                        )
+                    else:
+                        raise ValueError(
+                            msg + " Set optimizer.allow_pair_policy_override=true to "
+                            "demote this to a warning."
+                        )
+        else:
+            cqk_eff = bool(opt.couple_qk)
+            cvo_eff = bool(opt.couple_vo)
+            cud_eff = bool(opt.couple_updown)
+
         groups = classify_parameters(
             model,
-            couple_qk=bool(opt.couple_qk),
-            couple_vo=bool(opt.couple_vo),
-            couple_updown=bool(opt.couple_updown),
+            couple_qk=cqk_eff,
+            couple_vo=cvo_eff,
+            couple_updown=cud_eff,
             couple_mla=bool(opt.get("couple_mla", True)),
             couple_factff=bool(opt.get("couple_factff", True)),
             n_heads=n_heads,
@@ -353,31 +401,49 @@ def build_optimizer(
         for a, b, h in groups.coupled_factff:
             coupled_pairs.append((a, b, h, False))
 
-        # The multi-head Q-K branch in coupled_muon.py reshapes head_dim into
-        # 2-D RoPE rotation pairs. That structure only exists with full RoPE.
-        # Disable use_multi_head when:
-        #   - pos_emb.type == "learned" (no rotation at all), or
-        #   - rope_partial_frac < 1 (partial RoPE; tail channels are unrotated).
-        # Per experiment.md a.4 / b.2 — rung C ('learned-pos') and modded-style
-        # half-RoPE both fall under this guard.
+        # Phase-2.1: compute rope_status and resolve qk_coupling policy.
+        # The pre-refactor behavior ("disable use_multi_head; fall through to
+        # flat-2D under non-full-RoPE") is now policy-mediated by the
+        # optimizer. The factory's job is (a) compute rope_status, (b) read
+        # the qk_coupling.{full_rope, no_rope_policy, partial_rope_policy}
+        # values, (c) fail-fast on invalid combinations, and (d) thread
+        # rotary_dim to the optimizer for partial_rope_split.
         use_multi_head = bool(opt.get("use_multi_head", False))
         pos_emb_type = str(cfg.model.pos_emb.get("type", "rope"))
         rope_partial_frac = float(cfg.model.attn.get("rope_partial_frac", 1.0))
-        rope_unsafe = rope_partial_frac < 1.0 or pos_emb_type != "rope"
-        if use_multi_head and rope_unsafe:
-            reason = (
-                f"pos_emb.type={pos_emb_type!r}"
-                if pos_emb_type != "rope"
-                else f"rope_partial_frac={rope_partial_frac}"
+        if pos_emb_type == "rope" and rope_partial_frac >= 1.0:
+            rope_status = "full"
+        elif pos_emb_type == "rope" and 0.0 < rope_partial_frac < 1.0:
+            rope_status = "partial"
+        else:
+            rope_status = "none"
+
+        # qk_coupling block (defaults preserve Phase-1 numerics bitwise; under
+        # full RoPE the legacy_rope2d path dispatches to the unmodified
+        # legacy function; under non-full-RoPE the current_flat2d_fallback
+        # dispatches to the unmodified flat-2D kernel call).
+        qk_coupling_cfg = opt.get("qk_coupling", {}) or {}
+        qk_full_rope = str(qk_coupling_cfg.get("full_rope", "legacy_rope2d")).lower()
+        qk_no_rope = str(qk_coupling_cfg.get("no_rope_policy", "current_flat2d_fallback")).lower()
+        qk_partial_rope = str(qk_coupling_cfg.get("partial_rope_policy", "current_flat2d_fallback")).lower()
+
+        # Fail-fast on the one combination that cannot work numerically.
+        if rope_status == "none" and qk_no_rope == "partial_rope_split":
+            raise ValueError(
+                "optimizer.qk_coupling.no_rope_policy='partial_rope_split' is "
+                "invalid when rope_status='none' (pos_emb.type=learned). "
+                "There are no RoPE channels to split. Choose "
+                "current_flat2d_fallback | qk_off | headwise_no_rope."
             )
-            warnings.warn(
-                f"Disabling use_multi_head: the QK 2-D rotation-pair reshape requires "
-                f"full RoPE, but {reason}. V-O multi-head coupling is also disabled "
-                f"(global flag). Set pos_emb.type=rope and rope_partial_frac=1.0 to "
-                f"re-enable.",
-                stacklevel=2,
-            )
-            use_multi_head = False
+
+        # Compute rotary_dim (head_dim rounded to even, in [2, head_dim]).
+        head_dim_attr = cfg.model.attn.get("head_dim")
+        if head_dim_attr:
+            head_dim_resolved = int(head_dim_attr)
+        else:
+            head_dim_resolved = int(cfg.model.hidden) // n_heads
+        rotary_dim = int(head_dim_resolved * rope_partial_frac) & ~1
+        rotary_dim = max(2, min(head_dim_resolved, rotary_dim))
 
         return CoupledMuon_v2(
             lr=float(opt.lr),
@@ -403,6 +469,12 @@ def build_optimizer(
             ns_coefficients=str(opt.get("ns_coefficients", "bernstein")),
             ns_gram_form=bool(opt.get("ns_gram_form", False)),
             lr_prefactor=str(opt.get("lr_prefactor", "moonlight")),
+            # Phase-2.1 Q-K policy.
+            qk_coupling_full_rope=qk_full_rope,
+            qk_coupling_no_rope_policy=qk_no_rope,
+            qk_coupling_partial_rope_policy=qk_partial_rope,
+            rope_status=rope_status,
+            rotary_dim=rotary_dim,
         )
 
     raise ValueError(f"Unknown optimizer.type={opt.type!r}")

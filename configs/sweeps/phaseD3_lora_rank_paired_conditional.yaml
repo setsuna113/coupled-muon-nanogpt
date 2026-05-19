@@ -1,0 +1,30 @@
+# Phase-2.1 D3 — paired LoRA-rank sweep at O_mla. CONDITIONAL on D1 positive
+# (D-gate: delta_p50 > 1.5 × pooled_seed_std). Supersedes the Phase-2
+# lora_rank_sweep.yaml which was unpaired and could not support a Coupled-
+# vs-Muon rank-knee claim.
+#
+# 30 cells = 5 ranks × 2 optimizers (Muon, CoupledMuon) × 3 paired seeds.
+# Fixed q_lora_rank=64 so the rank axis only varies the KV side. Lives on
+# R_screen (8×H100, 4-way parallel for MLA-MoE), ~3.9 h/cell, ~1.22
+# R_screen days.
+#
+# BEFORE LAUNCH: patch optimizer.qk_coupling.{no/partial}_rope_policy to the
+# Phase-B winners and optimizer.pair_policy to the Phase-C winner via
+# `--override` at dispatch time.
+base: configs/ladder/O_mla.yaml
+grid:
+  optimizer.type: [muon, coupled_muon_v2]
+  model.attn.kv_lora_rank: [16, 32, 64, 128, 256]
+  seed: [0, 1, 2]
+fixed:
+  optimizer.lr: 1.0e-2
+  optimizer.coupled_steps: 4
+  optimizer.ns_steps: 5
+  optimizer.ns_coefficients: bernstein
+  optimizer.qk_coupling.full_rope: legacy_rope2d
+  optimizer.qk_coupling.no_rope_policy: current_flat2d_fallback
+  optimizer.qk_coupling.partial_rope_policy: current_flat2d_fallback
+  optimizer.couple_mla: true
+  model.attn.q_lora_rank: 64
+  run.wandb_project: coupled-muon-lora-rank-paired
+  run.wandb_group: "${name}/phase2.1_d3_kv${model.attn.kv_lora_rank}_${optimizer.type}"

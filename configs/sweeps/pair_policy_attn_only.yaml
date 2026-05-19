@@ -1,3 +1,6 @@
+# status: superseded-by-phaseC-pair-policy-lr — Phase 2.1 expands Phase C to
+# own-best LR per policy (3 LRs × 5 seeds × 3 policies = 45 cells). This
+# single-LR YAML is kept on disk for reference but is not in active dispatch.
 # Phase-2 Tier A1 (1/3) — Pair-selection at production rung I.
 # Couple attention pairs (Q-K, V-O) only; FFN up-down OFF (sent to plain Muon).
 # Tests whether the LLaMA-60M coupled gain is attention-side at production
