@@ -88,6 +88,33 @@ semantic table. Items removed from active plan (LR-prefactor, unconditional
 FactFF/350M/LoRA-rank, full K-curve, L MoE rung, A1' AdamW@I' top-up) stay
 on disk with `# status: ...` comment-headers; do NOT relaunch them.
 
+### Phase 2.1 — live progress
+
+Operational state log. Update on every launch / completion. The "Lane queue
+per rig" table below is the *plan*; this table is what has actually run.
+
+**Note on rig usage**: the lane-queue table assumes three rigs in parallel.
+Current execution is **single-rig sequential on the 2×H200** — Phase B is
+being run on the 2×H200 (not R_screen as the plan's results-dir label
+`rigB` suggests; that label is the logical Phase-2.1 lane, not the physical
+rig). The run_id hash is cfg+seed, so the physical rig does not matter for
+resume / dedupe.
+
+| # | Sweep | Phase | Cells | Physical rig | Results dir (`$GLOBAL/…`) | State | Wall-clock | Wandb |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `phaseA3_k_curve_minimal_A0` | A3 | 9 | 2×H200 | `phase2.1-rigC-a3-kcurve-a0/` | ✅ done 9/9, synced | 4.17 h | `coupled-muon-k-curve` (offline runs synced) |
+| 2 | `phaseB_qk_no_rope_C` | B1 | 27 | 2×H200 | `phase2.1-rigB-b-qk-no-rope-C/` | ▶ running | ~26 h est. | `coupled-muon-qk-policy` (offline) |
+
+Measured anchor (supersedes the conservative plan estimates): A0 dense
+60M-CS at 1.2B tokens ran **0.46 h/cell** on the 2×H200 (4.17 h / 9). C/D/E
+are 2.5B tokens (2.08×) ⇒ ≈ 1.0 h/cell; H' likewise.
+
+**Next after #2** (2×H200, in execution-order priority): `phaseB_qk_no_rope_D`
+(27) → `phaseB_qk_no_rope_E` (27) → `phaseB_qk_partial_rope_Hprime` (48) →
+`phaseB_muon_baseline_Hprime` (9) → B2 confirms. `phaseA2_*` NS top-up
+(4 cells, ~2 h) is a deferred filler — blocked on the canonical-coefficient
+hash check (pre-launch step 4 below).
+
 ### Lane queue per rig
 
 | Rig | Queue (in order) | Cells | Wandb projects | Results dirs |
