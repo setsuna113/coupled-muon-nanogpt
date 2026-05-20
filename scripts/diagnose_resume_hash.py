@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
-"""Diagnose why `filter_unfinished_jobs.py` flagged finished cells as missing.
+"""Diagnose why `filter_unfinished_jobs.py` flags finished cells as missing.
 
-`run_id` (utils.py) hashes the *entire resolved config*, including
-`run.output_dir`. `run_sweep.py` feeds `train.py` the raw `--results-dir`
-string; `filter_unfinished_jobs.py` feeds the symlink-*resolved* path. If the
-results dir crosses a symlink, those differ and every recomputed hash misses
-the on-disk dir — so a clean resume looks like a full rerun.
+`run_id` (utils.py) hashes the *entire resolved config*. If any config input
+drifted since the cells were trained, every recomputed hash misses its
+on-disk dir and a resume becomes a full rerun.
 
-This script recomputes each job's `run_id` both ways and reports how many
-match a directory on disk. If neither form explains the miss, it diffs a
-freshly-resolved config against the `config.yaml` that `train.py` persisted
-in an existing finished cell, so the drifted key is obvious.
+For each job in <results-dir>/_all.jsonl this script:
+  1. recomputes run_id and checks for an on-disk match;
+  2. for every miss, finds the closest sibling dir (same name+seed, fewest
+     config.yaml differences) and records which keys differ;
+  3. prints an aggregate histogram of drifted keys across all misses, so the
+     single responsible input (a base.yaml key, an LR grid, ...) is obvious.
+
+It also reports *which* base.yaml `load_config` actually reads — decisive
+when an editable-vs-installed package makes a `git checkout` look ineffective.
 
 Usage:
     uv run python scripts/diagnose_resume_hash.py --results-dir $RDIR
-    uv run python scripts/diagnose_resume_hash.py --results-dir $RDIR --jobs $RDIR/_all.jsonl
 """
 from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
+from coupled_muon_nanogpt import train as train_mod
 from coupled_muon_nanogpt.train import load_config
 from coupled_muon_nanogpt.utils import _to_jsonable, run_id
 
@@ -48,76 +52,79 @@ def main():
     repo = Path(__file__).resolve().parent.parent
     rdir = args.results_dir
     jobs_path = args.jobs or (rdir / "_all.jsonl")
-    raw = str(rdir)
-    res = str(rdir.resolve())
 
-    print(f"raw      : {raw}")
-    print(f"resolved : {res}")
-    print(f"identical: {raw == res}\n")
+    # Which base.yaml does load_config actually read? (editable vs installed)
+    base_yaml = (Path(train_mod.__file__).resolve().parent.parent.parent
+                 / "configs" / "base.yaml")
+    qk_in_base = (base_yaml.exists()
+                  and any("qk_coupling" in ln
+                          for ln in base_yaml.read_text().splitlines()))
+    print(f"train.py         : {train_mod.__file__}")
+    print(f"load_config reads: {base_yaml}  (exists={base_yaml.exists()})")
+    print(f"  -> still has qk_coupling block: {qk_in_base}")
+    print(f"results-dir      : {rdir}\n")
 
-    jobs = [json.loads(line) for line in open(jobs_path) if line.strip()]
-    hit = {"raw": 0, "res": 0}
-    first_miss = None
+    from omegaconf import OmegaConf
+    jobs = [json.loads(ln) for ln in open(jobs_path) if ln.strip()]
+
+    matched = no_sibling = 0
+    drift_keys: Counter = Counter()
+    examples: dict[str, tuple] = {}
 
     for job in jobs:
         base = repo / job["base"]
         ov = [f"{k}={v}" for k, v in job["overrides"].items()]
-        rids = {}
-        for tag, od in (("raw", raw), ("res", res)):
-            cfg = load_config(str(base), ov + [f"run.output_dir={od}"])
-            rids[tag] = run_id(cfg, int(job["seed"]))
-            if (rdir / rids[tag]).exists():
-                hit[tag] += 1
-        if (first_miss is None
-                and not (rdir / rids["raw"]).exists()
-                and not (rdir / rids["res"]).exists()):
-            first_miss = (job, rids)
+        cfg = load_config(str(base), ov + [f"run.output_dir={rdir}"])
+        rid = run_id(cfg, int(job["seed"]))
+        if (rdir / rid).exists():
+            matched += 1
+            continue
 
-    print(f"jobs={len(jobs)}  match_with_raw={hit['raw']}  "
-          f"match_with_resolved={hit['res']}\n")
+        fresh = _to_jsonable(cfg)
+        name = rid.rsplit("-s", 1)[0]
+        seed = job["seed"]
+        best = None
+        for s in sorted(rdir.glob(f"{name}-s{seed}-*")):
+            cy = s / "config.yaml"
+            if not cy.exists():
+                continue
+            stored = OmegaConf.to_container(OmegaConf.load(cy), resolve=True)
+            d = diff(stored, fresh)
+            if best is None or len(d) < len(best[1]):
+                best = (s, d)
+        if best is None:
+            no_sibling += 1
+            continue
+        for path, sv, fv in best[1]:
+            drift_keys[path] += 1
+            examples.setdefault(path, (best[0].name, sv, fv))
 
-    if hit["raw"] == len(jobs):
-        print("=> CAUSE: the filter's .resolve() breaks the hash.")
-        print("   Re-run filter_unfinished_jobs.py with the raw path forced:")
-        print(f'   --extra-override "run.output_dir={raw}"')
-        return
-    if hit["res"] == len(jobs):
-        print("=> All cells match the RESOLVED path — filter logic is consistent.")
-        print("   The miss is elsewhere; inspect the filter output paths.")
-        return
+    n_miss = len(jobs) - matched
+    print(f"jobs={len(jobs)}  matched={matched}  missing={n_miss}  "
+          f"(of missing: {no_sibling} have no sibling dir at all)\n")
 
-    print("=> Neither output_dir form matches all cells. Probing for config drift...")
-    if first_miss is None:
-        print("   (no fully-missing job; partial mismatch — inspect manually)")
-        return
-
-    job, rids = first_miss
-    name_prefix = rids["raw"].rsplit("-s", 1)[0]
-    seed = job["seed"]
-    cands = sorted(rdir.glob(f"{name_prefix}-s{seed}-*"))
-    print(f"   probe job : base={job['base']} seed={seed}")
-    print(f"   computed run_id (raw output_dir) : {rids['raw']}")
-    print(f"   on-disk dirs {name_prefix}-s{seed}-* : {[c.name for c in cands]}")
-    if not cands:
-        print("   no dir with this name+seed -> sweep was REDEFINED (genuinely new cells).")
+    if n_miss == 0:
+        print("=> All cells matched. Nothing to diagnose.")
         return
 
-    stored_path = cands[0] / "config.yaml"
-    if not stored_path.exists():
-        print(f"   {stored_path} missing -> cannot diff.")
-        return
+    print("Drifted keys across the missing cells "
+          "(count : key  — how many missing cells differ there):")
+    for path, cnt in drift_keys.most_common():
+        ex_dir, sv, fv = examples[path]
+        print(f"  [{cnt:3d}/{n_miss}] {path}")
+        print(f"            e.g. stored({ex_dir})={sv!r}  fresh={fv!r}")
 
-    from omegaconf import OmegaConf
-    stored = OmegaConf.to_container(OmegaConf.load(stored_path), resolve=True)
-    base = repo / job["base"]
-    ov = [f"{k}={v}" for k, v in job["overrides"].items()]
-    fresh = _to_jsonable(load_config(str(base), ov + [f"run.output_dir={raw}"]))
-    deltas = diff(stored, fresh)
-    print(f"\n   diff  stored({cands[0].name}/config.yaml)  vs  freshly-resolved:")
-    if not deltas:
-        print("     (no differences — run_id should match; check the name field)")
-    for path, sv, fv in deltas:
-        print(f"     {path}:  stored={sv!r}  fresh={fv!r}")
+    print()
+    universal = [k for k, c in drift_keys.items() if c == n_miss]
+    if universal:
+        print(f"=> {len(universal)} key(s) differ in EVERY missing cell:")
+        for k in universal:
+            print(f"     {k}")
+        print("   That is the drifted input. Restore it to the value the cells")
+        print("   were trained with, then re-run filter_unfinished_jobs.py.")
+    else:
+        print("=> No single universal key — drift is heterogeneous; read the")
+        print("   per-key counts above (likely a sweep-grid redefinition).")
 
 
 if __name__ == "__main__":
