@@ -105,9 +105,9 @@ does not matter for resume / dedupe.
 | 2 | `phaseB_qk_no_rope_C` | B1 | 27 | 2×H200 | `phase2.1-rigB-b-qk-no-rope-C/` | ✅ done 27/27 | 20.20 h | `coupled-muon-qk-policy` (offline, sync pending) |
 | 3 | `phaseB_qk_no_rope_D` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-D/` | ✅ done 27/27 | ~5.3 h | `coupled-muon-qk-policy` (offline, sync pending) |
 | 4 | `phaseB_qk_no_rope_E` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-E/` | ✅ done 27/27 | 5.29 h | `coupled-muon-qk-policy` (offline, sync pending) |
-| 5 | `phaseC_pair_policy_lr` | C1 | 45 | 8×H100 | `phase2.1-rigB-c-pair-policy/` | ▶ running (4-way parallel) | ~24 h est. | `coupled-muon-pair-policy-lr` (offline) |
-| 6 | `phaseB_qk_partial_rope_Hprime` | B1 | 48 (split 24/24) | 8×H100 + 2×H200 | `phase2.1-rigB-b-qk-partial-rope-Hprime/` | ▶ running | ~4.5 h (8×H100 half-A) + ~18 h (2×H200 half-B) | `coupled-muon-qk-policy` (offline) |
-| 7 | `phaseB_muon_baseline_Hprime` | B1 | 9 | 2×H200 | `phase2.1-rigB-b-muon-baseline-Hprime/` | ⏳ queued (chained after #6 half-B) | ~6 h est. | `coupled-muon-qk-policy` (offline) |
+| 5 | `phaseC_pair_policy_lr` | C1 | 45 | 8×H100 | `phase2.1-rigB-c-pair-policy/` | ▶ running (4-way parallel, Phase-C-only) | ~24 h est. | `coupled-muon-pair-policy-lr` (offline) |
+| 6 | `phaseB_qk_partial_rope_Hprime` | B1 | 48 | 2×H200 | `phase2.1-rigB-b-qk-partial-rope-Hprime/` | ▶ running (full sweep, un-split) | ~36 h est. | `coupled-muon-qk-policy` (offline) |
+| 7 | `phaseB_muon_baseline_Hprime` | B1 | 9 | TBD | `phase2.1-rigB-b-muon-baseline-Hprime/` | ⏳ DEFERRED — slot after #5 or #6 | ~6 h est. | `coupled-muon-qk-policy` (offline) |
 
 Measured anchors (supersede the conservative plan estimates):
 - A0 dense 60M-CS, 1.2B tokens: **0.46 h/cell** on a 2-GPU slice (4.17 h / 9).
@@ -141,17 +141,19 @@ Blocked:
   D3 / D4 / E1  — blocked on D1 + D-gate.
 ```
 
-**Work split rationale**: Phase C (45 MoE cells, ~24 h) → 8×H100 for its
-4-way parallelism. H' (48 cells) is **split 24/24** across both rigs —
-`head -24` / `tail -24` of the deterministically-expanded JSONL; `run_id`
-is `hash(cfg+seed)` so both halves land collision-free in the single
-`b-qk-partial-rope-Hprime/` results dir. 8×H100 runs half-A (~4.5 h,
-chained after Phase C); 2×H200 runs half-B (~18 h) + H'-Muon (9 cells,
-~6 h). This balances finish times (~28 h on 8×H100, ~24 h on 2×H200)
-instead of overloading the 2×H200 with the full 57-cell H' block (~42 h).
-Both rigs' work is independent and gates D1, so running in parallel is the
-critical path. `phaseA2_*` NS top-up (4 cells, ~3 h) remains a deferred
-filler — blocked on the canonical-coefficient hash check (pre-launch step 4).
+**Work split**: 8×H100 → Phase C alone (45 MoE cells, ~24 h, 4-way
+parallel). 2×H200 → full H' (48 cells, ~36 h, sequential). The earlier
+24/24 H' split was dropped — the 8×H100 was already launched on
+Phase-C-only, so H' runs whole on the 2×H200.
+
+**H'-Muon (#7) is deferred and must NOT be forgotten**: it is the plain-Muon
+baseline the H' `partial_rope_winner` is judged against (decision rule
+d.7.4 §2 — "matches or beats the H' Muon baseline"). The H' analysis cannot
+close without it. Slot the 9-cell run on whichever rig frees first — 8×H100
+after Phase C (#5) or 2×H200 after H' (#6).
+
+`phaseA2_*` NS top-up (4 cells, ~3 h) remains a deferred filler — blocked on
+the canonical-coefficient hash check (pre-launch step 4).
 
 ### Lane queue per rig
 
