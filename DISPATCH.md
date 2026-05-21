@@ -93,43 +93,60 @@ on disk with `# status: ...` comment-headers; do NOT relaunch them.
 Operational state log. Update on every launch / completion. The "Lane queue
 per rig" table below is the *plan*; this table is what has actually run.
 
-**Note on rig usage**: two rigs now active in parallel — the **2×H200** and
-the **8×H100**. The plan's results-dir label `rigB` is the *logical*
-Phase-2.1 lane (R_screen in the plan), not the physical rig — Phase B rungs
-C/D/E are split across both physical rigs. The run_id hash is cfg+seed, so
-the physical rig does not matter for resume / dedupe.
+**Note on rig usage**: two rigs active in parallel — the **2×H200** and the
+**8×H100**. The plan's results-dir label `rigB` is the *logical* Phase-2.1
+lane (R_screen in the plan), not the physical rig — Phase B rungs are split
+across both physical rigs. The run_id hash is cfg+seed, so the physical rig
+does not matter for resume / dedupe.
 
 | # | Sweep | Phase | Cells | Physical rig | Results dir (`$GLOBAL/…`) | State | Wall-clock | Wandb |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `phaseA3_k_curve_minimal_A0` | A3 | 9 | 2×H200 | `phase2.1-rigC-a3-kcurve-a0/` | ✅ done 9/9, synced | 4.17 h | `coupled-muon-k-curve` (synced) |
-| 2 | `phaseB_qk_no_rope_C` | B1 | 27 | 2×H200 | `phase2.1-rigB-b-qk-no-rope-C/` | ▶ running | ~26 h est. | `coupled-muon-qk-policy` (offline) |
-| 3 | `phaseB_qk_no_rope_D` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-D/` | ▶ running (4-way parallel) | ~9.4 h est. | `coupled-muon-qk-policy` (offline) |
-| 4 | `phaseB_qk_no_rope_E` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-E/` | ⏳ queued (chained after #3) | ~9.4 h est. | `coupled-muon-qk-policy` (offline) |
+| 2 | `phaseB_qk_no_rope_C` | B1 | 27 | 2×H200 | `phase2.1-rigB-b-qk-no-rope-C/` | ✅ done 27/27 | 20.20 h | `coupled-muon-qk-policy` (offline, sync pending) |
+| 3 | `phaseB_qk_no_rope_D` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-D/` | ✅ done 27/27 | ~5.3 h | `coupled-muon-qk-policy` (offline, sync pending) |
+| 4 | `phaseB_qk_no_rope_E` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-E/` | ✅ done 27/27 | 5.29 h | `coupled-muon-qk-policy` (offline, sync pending) |
+| 5 | `phaseC_pair_policy_lr` | C1 | 45 | 8×H100 | `phase2.1-rigB-c-pair-policy/` | ▶ running (4-way parallel) | ~30 h est. | `coupled-muon-pair-policy-lr` (offline) |
+| 6 | `phaseB_qk_partial_rope_Hprime` | B1 | 48 | 2×H200 | `phase2.1-rigB-b-qk-partial-rope-Hprime/` | ▶ running | ~36 h est. | `coupled-muon-qk-policy` (offline) |
+| 7 | `phaseB_muon_baseline_Hprime` | B1 | 9 | 2×H200 | `phase2.1-rigB-b-muon-baseline-Hprime/` | ⏳ queued (chained after #6) | ~6 h est. | `coupled-muon-qk-policy` (offline) |
 
-Measured anchors (supersede the conservative plan estimates): A0 dense
-60M-CS at 1.2B tokens ran **0.46 h/cell** on the 2×H200 (4.17 h / 9). C/D/E
-are 2.5B tokens (2.08×) ⇒ ≈ **1.0 h/cell on 2×H200**, ≈ **1.34 h/cell on
-2×H100** (H200 ≈ 1.4× H100). On the 8×H100 in 4-way-parallel mode
-(`--nproc-per-node 2 --num-workers 4`, 2 GPU/cell) a 27-cell rung is
-≈ 7 waves × 1.34 h ≈ **9.4 h**; D + E chained ≈ **19 h**.
+Measured anchors (supersede the conservative plan estimates):
+- A0 dense 60M-CS, 1.2B tokens: **0.46 h/cell** on a 2-GPU slice (4.17 h / 9).
+- C/D/E/H' dense 60M-CS, 2.5B tokens: **~0.75 h/cell** on a 2-GPU slice
+  (C: 20.20 h / 27 = 0.748). A 2-GPU slice of the 8×H100 ≈ a dedicated
+  2×H200 for this workload (E: 5.29 h, 27 cells, 4-way ⇒ 0.78 h/cell-slice).
+- I MoE 60M-CS backbone, 5B tokens: **~2 h/cell** est. on a 2-GPU slice
+  (no direct measurement yet; token-scaled from C × MoE overhead).
 
 **8×H100 grad_accum note**: 4-way-parallel mode keeps each cell at
-world_size=2 (2 GPU/cell), so the ladder YAML's `grad_accum_steps: 8` (tuned
-for the 2-GPU baseline) is correct as-is — do NOT quarter it. Quartering
-only applies to a single cell spanning all 8 GPUs (world_size=8), which this
-dispatch does not use.
+world_size=2 (2 GPU/cell), so the ladder YAML's `grad_accum_steps` is
+correct as-is — do NOT quarter it. Quartering only applies to a single cell
+spanning all 8 GPUs (world_size=8), which this dispatch does not use.
 
-**Work split for the Phase B no_rope sweep (C/D/E)**: 2×H200 → C (#2);
-8×H100 → D + E chained (#3, #4). All three finish roughly in parallel
-(~26 h on 2×H200 vs ~19 h on 8×H100).
+#### Chain / dependency state
 
-**Next after the above**:
-- 2×H200 after #2 (C): `phaseB_qk_partial_rope_Hprime` (48) →
-  `phaseB_muon_baseline_Hprime` (9).
-- 8×H100 after #4 (E): B2 confirms once the B1 winners are read off W&B,
-  or pick up H' / H'-Muon if the 2×H200 is still busy.
-- `phaseA2_*` NS top-up (4 cells, ~2 h) is a deferred filler — blocked on
-  the canonical-coefficient hash check (pre-launch step 4 below).
+```
+Phase B1 no_rope sweep (C/D/E)  ✅ COMPLETE (#2/#3/#4, 81 cells)
+  → no_rope_winner is now ANALYSABLE (read W&B coupled-muon-qk-policy).
+Phase B1 H' (partial_rope sweep + Muon baseline)  ▶ running (#6/#7)
+  → partial_rope_winner analysable after #6 + #7.
+Phase C  pair_policy localization  ▶ running (#5)  [independent of Phase B]
+  → MoE pair_policy default analysable after #5.
+
+Blocked:
+  B2-no-RoPE confirm (10)  — UNBLOCKED by data (C/D/E done) but needs the
+      no_rope_winner picked + baked via --override; queue when a rig frees.
+  B2-partial-RoPE confirm (5)  — blocked on #6 + #7 (H').
+  D1 O_mla (45)  — blocked on (B winner tuple) AND (C winner). Launch after
+      #5/#6/#7 + both B2 confirms, with all three winners --override'd in.
+  D3 / D4 / E1  — blocked on D1 + D-gate.
+```
+
+**Work split rationale**: Phase C (45 MoE cells, heaviest remaining job)
+goes to the 8×H100 for its 4-way parallelism (~30 h vs ~90 h+ sequential on
+2×H200). Phase B H' + H'-Muon (57 dense cells) goes to the 2×H200 (~42 h).
+Both are independent and both gate D1, so running them in parallel is the
+critical path. `phaseA2_*` NS top-up (4 cells, ~3 h) remains a deferred
+filler — blocked on the canonical-coefficient hash check (pre-launch step 4).
 
 ### Lane queue per rig
 
