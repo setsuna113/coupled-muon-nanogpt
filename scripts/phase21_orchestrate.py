@@ -275,8 +275,6 @@ class Orchestrator:
 
     def run_filtered_sweep(self, key: str, *, job_path: Path | None = None, done_key: str | None = None) -> None:
         done_key = done_key or key
-        if self.ensure_count_done(key):
-            return
         nproc, workers, gpus = RUN_ARGS[self.role][key]
         source_jobs = job_path or self.job_path(key)
         if not source_jobs.exists():
@@ -300,11 +298,12 @@ class Orchestrator:
         pending = count_jsonl(remaining)
         if pending == 0:
             log(f"{key}: no unfinished jobs in {source_jobs}")
-            if self.ensure_count_done(key):
-                return
-            if done_key != key:
+            if done_key == key:
+                done = count_done(results_dir)
+                self.mark_done(done_key, extra=f"exact_jobs_complete=1 completed_dirs={done}/{EXPECTED[key]}")
+            else:
                 self.mark_done(done_key, extra="shard had no unfinished jobs")
-                return
+            return
         self.run(
             [
                 sys.executable,
@@ -322,11 +321,25 @@ class Orchestrator:
             label=f"launch {key}",
         )
         if done_key == key:
+            post_remaining = self.jobs_dir / f"{source_jobs.stem}.{self.role}.post.remaining.jsonl"
+            self.run(
+                [
+                    sys.executable,
+                    str(self.repo_root / "scripts" / "filter_unfinished_jobs.py"),
+                    "--in",
+                    str(source_jobs),
+                    "--out",
+                    str(post_remaining),
+                    "--results-dir",
+                    str(results_dir),
+                ],
+                label=f"verify {key}",
+            )
+            still_pending = count_jsonl(post_remaining)
+            if still_pending:
+                raise SystemExit(f"{key} launcher exited with {still_pending} jobs still unfinished")
             done = count_done(results_dir)
-            expected = EXPECTED[key]
-            if done != expected:
-                raise SystemExit(f"{key} launcher exited but completion is {done}/{expected}")
-            self.mark_done(key, extra=f"completed={done}/{expected}")
+            self.mark_done(key, extra=f"exact_jobs_complete=1 completed_dirs={done}/{EXPECTED[key]}")
         else:
             post_remaining = self.jobs_dir / f"{source_jobs.stem}.{self.role}.post.remaining.jsonl"
             self.run(
