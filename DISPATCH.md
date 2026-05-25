@@ -88,26 +88,41 @@ semantic table. Items removed from active plan (LR-prefactor, unconditional
 FactFF/350M/LoRA-rank, full K-curve, L MoE rung, A1' AdamW@I' top-up) stay
 on disk with `# status: ...` comment-headers; do NOT relaunch them.
 
-### Phase 2.1 — live progress
+### Phase 2.1 - live progress
 
-Operational state log. Update on every launch / completion. The "Lane queue
-per rig" table below is the *plan*; this table is what has actually run.
+Operational state log. Current launch mode is a three-machine chained dispatch
+coordinated by `$GLOBAL/phase2.1-control/`. The physical machines run separate
+roles (`h100`, `h200x2`, `h200x4`) but share one control directory and one set
+of result directories. The run_id hash is cfg+seed, so D1 can be split across
+machines as long as every shard uses the same materialized JSONL and
+`--results-dir`.
 
-**Note on rig usage**: two rigs active in parallel — the **2×H200** and the
-**8×H100**. The plan's results-dir label `rigB` is the *logical* Phase-2.1
-lane (R_screen in the plan), not the physical rig — Phase B rungs are split
-across both physical rigs. The run_id hash is cfg+seed, so the physical rig
-does not matter for resume / dedupe.
+Control artifacts:
+- `$GLOBAL/phase2.1-control/p21_winners.{json,env}`: on-disk B/C readout.
+- `$GLOBAL/phase2.1-control/jobs/p21_*.jsonl`: generated launch JSONLs.
+- `$GLOBAL/phase2.1-control/done/*.done`: cross-machine gates.
+- `$GLOBAL/phase2.1-control/p21_d_gate.json`: D1 readout and conditional gate.
+
+Generate the three pasteable one-line commands from the repo root with:
+`uv run python scripts/phase21_make_launchers.py --out /tmp/phase21_launch_commands.txt`
 
 | # | Sweep | Phase | Cells | Physical rig | Results dir (`$GLOBAL/…`) | State | Wall-clock | Wandb |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `phaseA3_k_curve_minimal_A0` | A3 | 9 | 2×H200 | `phase2.1-rigC-a3-kcurve-a0/` | ✅ done 9/9, synced | 4.17 h | `coupled-muon-k-curve` (synced) |
-| 2 | `phaseB_qk_no_rope_C` | B1 | 27 | 2×H200 | `phase2.1-rigB-b-qk-no-rope-C/` | ✅ done 27/27 | 20.20 h | `coupled-muon-qk-policy` (offline, sync pending) |
-| 3 | `phaseB_qk_no_rope_D` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-D/` | ✅ done 27/27 | ~5.3 h | `coupled-muon-qk-policy` (offline, sync pending) |
-| 4 | `phaseB_qk_no_rope_E` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-E/` | ✅ done 27/27 | 5.29 h | `coupled-muon-qk-policy` (offline, sync pending) |
-| 5 | `phaseC_pair_policy_lr` | C1 | 45 | 8×H100 | `phase2.1-rigB-c-pair-policy/` | ▶ running (4-way parallel, Phase-C-only) | ~24 h est. | `coupled-muon-pair-policy-lr` (offline) |
-| 6 | `phaseB_qk_partial_rope_Hprime` | B1 | 48 | 2×H200 | `phase2.1-rigB-b-qk-partial-rope-Hprime/` | ▶ running (full sweep, un-split) | ~36 h est. | `coupled-muon-qk-policy` (offline) |
-| 7 | `phaseB_muon_baseline_Hprime` | B1 | 9 | TBD | `phase2.1-rigB-b-muon-baseline-Hprime/` | ⏳ DEFERRED — slot after #5 or #6 | ~6 h est. | `coupled-muon-qk-policy` (offline) |
+| 2 | `phaseB_qk_no_rope_C` | B1 | 27 | 2×H200 | `phase2.1-rigB-b-qk-no-rope-C/` | ✅ done 27/27 | 20.20 h | `coupled-muon-qk-policy` (offline; sync optional) |
+| 3 | `phaseB_qk_no_rope_D` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-D/` | ✅ done 27/27 | ~5.3 h | `coupled-muon-qk-policy` (offline; sync optional) |
+| 4 | `phaseB_qk_no_rope_E` | B1 | 27 | 8×H100 | `phase2.1-rigB-b-qk-no-rope-E/` | ✅ done 27/27 | 5.29 h | `coupled-muon-qk-policy` (offline; sync optional) |
+| 5 | `phaseC_pair_policy_lr` | C1 | 45 | 8×H100 | `phase2.1-rigB-c-pair-policy/` | ✅ done 45/45, on-disk readout for B2/D1 | ~24 h | `coupled-muon-pair-policy-lr` (offline; sync optional) |
+| 6 | `phaseB_qk_partial_rope_Hprime` | B1 | 48 | 2×H200 | `phase2.1-rigB-b-qk-partial-rope-Hprime/` | ✅ done 48/48, on-disk readout for B2 | ~36 h | `coupled-muon-qk-policy` (offline; sync optional) |
+| 7 | `phaseB_muon_baseline_Hprime` + top-up | B1 | 15 | 2×H200 | `phase2.1-rigB-b-muon-baseline-Hprime/` | ✅ done 15/15, on-disk readout for B2 | >10 h | `coupled-muon-qk-policy` (offline; sync optional) |
+| 8 | `phaseB2_confirm_no_rope` | B2 | 10 | 8×H100 | `phase2.1-rigB-b2-no-rope-confirm/` | launch via `h100` role after materializing winners | ~3.3 h | `coupled-muon-qk-policy-confirm` |
+| 9 | `phaseB2_confirm_partial_rope` | B2 | 5 | 2×H200 | `phase2.1-rigB-b2-partial-rope-confirm/` | launch via `h200x2` role after materializing winners | ~6.5 h | `coupled-muon-qk-policy-confirm` |
+| 10 | `adamw_equalization_I` | A1 | 10 | 4×H200 | `phase2.1-rigA-a1-adamw-I-topup/` | launch via `h200x4` role, then A3-I | ~1.25 rig-days est. | `coupled-muon-moe-anchor-adamw` (offline) |
+| 11 | `phaseA3_k_curve_minimal_I` | A3 | 9 | 4×H200 | `phase2.1-rigA-a3-kcurve-I/` | chained after #10 in `h200x4` role | ~1.46 rig-days est. | `coupled-muon-k-curve-I` (offline) |
+| 12 | `mla_lr_grid` | D1 | 45 | all three | `phase2.1-rigA-d1-mla/` | gated on B2 + A3-I; modulo-7 shards | ~6.6 rig-days est. | `coupled-muon-mla` |
+| 13 | `phaseD3_lora_rank_paired_conditional` | D3 | 30 | 8×H100 | `phase2.1-rigB-d3-lora-rank/` | conditional on D-gate positive | ~1.22 rig-days est. | `coupled-muon-lora-rank-paired` |
+| 14 | `imposed_factff` | D4 | 12 | 2×H200 | `phase2.1-rigC-d4-factff/` | conditional on D-gate positive | ~0.65 rig-days est. | `coupled-muon-imposed-factff` |
+| 15 | `mla_scaling_350m` | E1 | 30 | 4×H200 | `phase2.1-rigA-e1-mla-350m/` | conditional on D-gate positive | ~16.9 rig-days est. | `coupled-muon-mla-350m` |
 
 Measured anchors (supersede the conservative plan estimates):
 - A0 dense 60M-CS, 1.2B tokens: **0.46 h/cell** on a 2-GPU slice (4.17 h / 9).
@@ -126,44 +141,48 @@ spanning all 8 GPUs (world_size=8), which this dispatch does not use.
 
 ```
 Phase B1 no_rope sweep (C/D/E)  ✅ COMPLETE (#2/#3/#4, 81 cells)
-  → no_rope_winner is now ANALYSABLE (read W&B coupled-muon-qk-policy).
-Phase B1 H' (partial_rope sweep + Muon baseline)  ▶ running (#6/#7)
-  → partial_rope_winner analysable after #6 + #7.
-Phase C  pair_policy localization  ▶ running (#5)  [independent of Phase B]
-  → MoE pair_policy default analysable after #5.
+  -> no_rope_winner is now materializable from on-disk metrics.
+Phase B1 H' partial_rope sweep  ✅ COMPLETE (#6, 48/48; on-disk readout)
+Phase B1 H' Muon baseline  ✅ COMPLETE (#7, 15 cells = 5 seeds × 3 LRs; on-disk readout)
+  -> partial_rope_winner is now materializable from on-disk metrics.
+Phase C  pair_policy localization  ✅ COMPLETE (#5, 45/45; on-disk readout)
+  -> MoE pair_policy default is now materializable from on-disk metrics.
+
+Next:
+  h100   -> materialize winners if needed -> B2 no-RoPE -> wait B2/A3 -> D1 residues 0,1,2,3 -> D3 if D-positive.
+  h200x2 -> materialize winners if needed -> B2 partial-RoPE -> wait B2/A3 -> D1 residue 4 -> D4 if D-positive.
+  h200x4 -> A1 AdamW@I -> A3 K-curve-I -> wait B2 -> D1 residues 5,6 -> E1 if D-positive.
 
 Blocked:
-  B2-no-RoPE confirm (10)  — UNBLOCKED by data (C/D/E done) but needs the
-      no_rope_winner picked + baked via --override; queue when a rig frees.
-  B2-partial-RoPE confirm (5)  — blocked on #6 + #7 (H').
-  D1 O_mla (45)  — blocked on (B winner tuple) AND (C winner). Launch after
-      #5/#6/#7 + both B2 confirms, with all three winners --override'd in.
-  D3 / D4 / E1  — blocked on D1 + D-gate.
+  D1 O_mla (45) - blocked on both B2 confirmations and A3-I.
+  D3 / D4 / E1 - blocked on D1 + D-gate.
 ```
 
-**Work split**: 8×H100 → Phase C alone (45 MoE cells, ~24 h, 4-way
-parallel). 2×H200 → full H' (48 cells, ~36 h, sequential). The earlier
-24/24 H' split was dropped — the 8×H100 was already launched on
-Phase-C-only, so H' runs whole on the 2×H200.
+**Work split**: B1/C1 readout is done by `scripts/phase21_materialize.py`.
+Every launch first runs `scripts/filter_unfinished_jobs.py` against the exact
+target `--results-dir`; a restart should not duplicate completed cells.
 
-**H'-Muon (#7) is deferred and must NOT be forgotten**: it is the plain-Muon
-baseline the H' `partial_rope_winner` is judged against (decision rule
-d.7.4 §2 — "matches or beats the H' Muon baseline"). The H' analysis cannot
-close without it. Slot the 9-cell run on whichever rig frees first — 8×H100
-after Phase C (#5) or 2×H200 after H' (#6).
+**H'-Muon (#7) must be read from disk before Phase-B partial-RoPE decision**:
+it is the plain-Muon baseline the H' `partial_rope_winner` is judged against
+(decision rule d.7.4 §2 — "matches or beats the H' Muon baseline"). The run
+is 5-seed after the 6-cell top-up.
 
 `phaseA2_*` NS top-up (4 cells, ~3 h) remains a deferred filler — blocked on
 the canonical-coefficient hash check (pre-launch step 4).
 
 ### Lane queue per rig
 
-| Rig | Queue (in order) | Cells | Wandb projects | Results dirs |
+| Physical rig / role | Queue (in order) | Cells | Parallelism | Results dirs |
 |---|---|---|---|---|
-| **R_abl — 2×H200** | `phaseA3_k_curve_minimal_A0` (9) → `phaseA2_polar_express_K8_coupled_topup` + `phaseA2_cesista_K8_paired_topup` (4) → idle / `imposed_factff` (D4, 12, conditional) | 13 (+12 cond.) | `coupled-muon-k-curve`, `coupled-muon-ns-policy`, `coupled-muon-imposed-factff` | `$GLOBAL/phase2.1-rigC-{a3-kcurve-a0,a2-ns-topup,d4-factff}/` |
-| **R_prod — 4×H200** | `adamw_equalization_I` (A1, 10) → `phaseA3_k_curve_minimal_I` (9) → `mla_lr_grid` (D1, 45) → `mla_scaling_350m` (E1, 30, conditional) | 64 (+30 cond.) | `coupled-muon-moe-anchor-adamw`, `coupled-muon-k-curve-I`, `coupled-muon-mla`, `coupled-muon-mla-350m` | `$GLOBAL/phase2.1-rigA-{a1-adamw-I-topup,a3-kcurve-I,d1-mla,e1-mla-350m}/` |
-| **R_screen — 8×H100** | `phaseB_qk_no_rope_C` (27) → `phaseB_qk_no_rope_D` (27) → `phaseB_qk_no_rope_E` (27) → `phaseB_qk_partial_rope_Hprime` (48) → `phaseB_muon_baseline_Hprime` (9) → `phaseB2_confirm_no_rope` (10) → `phaseB2_confirm_partial_rope` (5) → `phaseC_pair_policy_lr` (45) → idle / `phaseD3_lora_rank_paired_conditional` (D3, 30, conditional) | 198 (+30 cond.) | `coupled-muon-qk-policy`, `coupled-muon-qk-policy-confirm`, `coupled-muon-pair-policy-lr`, `coupled-muon-lora-rank-paired` | `$GLOBAL/phase2.1-rigB-{b-qk-{no-rope,partial-rope,muon-baseline}-*, b2-{no,partial}-rope-confirm, c-pair-policy, d3-lora-rank}/` |
+| **8×H100 / `h100`** | B2 no-RoPE (10) -> D1 shard residues `0,1,2,3` (27) -> D3 LoRA-rank (30, conditional) | 10 + 27 (+30) | `--nproc-per-node 2 --num-workers 4 --gpus-per-worker 2` | `$GLOBAL/phase2.1-rigB-b2-no-rope-confirm/`, `$GLOBAL/phase2.1-rigA-d1-mla/`, `$GLOBAL/phase2.1-rigB-d3-lora-rank/` |
+| **2×H200 / `h200x2`** | B2 partial-RoPE (5) -> D1 shard residue `4` (6) -> D4 FactFF (12, conditional) | 5 + 6 (+12) | `--nproc-per-node 2 --num-workers 1 --gpus-per-worker 2` | `$GLOBAL/phase2.1-rigB-b2-partial-rope-confirm/`, `$GLOBAL/phase2.1-rigA-d1-mla/`, `$GLOBAL/phase2.1-rigC-d4-factff/` |
+| **4×H200 / `h200x4`** | A1 AdamW@I (10) -> A3 K-curve-I (9) -> D1 shard residues `5,6` (12) -> E1 350M MLA (30, conditional) | 19 + 12 (+30) | A/D1: `2×2-GPU`; E1: `--nproc-per-node 4 --num-workers 1 --gpus-per-worker 4` | `$GLOBAL/phase2.1-rigA-a1-adamw-I-topup/`, `$GLOBAL/phase2.1-rigA-a3-kcurve-I/`, `$GLOBAL/phase2.1-rigA-d1-mla/`, `$GLOBAL/phase2.1-rigA-e1-mla-350m/` |
 
-R_screen is the global critical path at ~4.12 rig-days through Phase B + C.
+D1 shard rule is fixed modulo 7 over `p21_d1_mla.jsonl`: `h100={0,1,2,3}`,
+`h200x2={4}`, `h200x4={5,6}`. This covers all 45 D1 cells exactly once.
+
+Expected result counts: B2 no-RoPE 10, B2 partial 5, A1 10, A3-I 9, D1 45,
+D3 30, D4 12, E1 30.
 
 ### Phase-2.1 timeline (T=0 = Phase 2.1 launch)
 
@@ -176,38 +195,39 @@ R_screen is the global critical path at ~4.12 rig-days through Phase B + C.
 | 1.10   | R_screen finishes B1 D → starts B1 E. |
 | 1.25   | R_prod finishes A1 → starts A3 K-curve I (9 cells, 1.46 d). |
 | 1.65   | R_screen finishes B1 E → starts B1 H' (48 cells, 0.65 d). |
-| 2.30   | R_screen finishes B1 H' → starts B1 H' Muon baseline (9 cells, 0.09 d). |
-| 2.39   | R_screen finishes H' Muon. **Read B1 W&B; declare (no_rope_winner, partial_rope_winner).** |
-| 2.39   | R_screen → B2-no-RoPE confirm (10 cells, override no_rope_policy + best-LR per rung). |
-| 2.53   | R_screen → B2-partial-RoPE confirm (5 cells, override partial_rope_policy + H' best LR). |
-| 2.60   | R_screen finishes B2. **MILESTONE: Phase B closed; v2.1 winner tuple declared.** |
-| 2.60   | R_screen → C1 pair_policy (45 cells, 1.83 d). |
-| 2.71   | R_prod finishes A3 K-curve I. R_prod **IDLE** (waiting on C). |
-| 4.43   | R_screen finishes C1. **MILESTONE: Phase C closed; MoE pair_policy default declared.** |
-| 4.43   | R_prod → D1 O_mla (45 cells, with B-winners + C-winner baked in via `--override`; 6.6 d). |
-| 11.03  | R_prod finishes D1. **MILESTONE: D-gate decision.** delta = Muon − Coupled at own-best LR per optimizer. Commission iff delta_p50 > 1.5 × pooled_seed_std AND bootstrap CI direction stable. |
-| 11.03+ | If D-positive: R_prod → E1 350M MLA (16.9 d); R_screen → D3 paired LoRA-rank (1.22 d); R_abl → D4 P_factff (0.65 d). |
-| 27.93  | E1 finishes (if commissioned). Phase 2.1 complete. |
+| 2.30   | 2×H200 finishes B1 H' → starts B1 H' Muon baseline + top-up (15 cells, >10 h). |
+| 2.39+  | 2×H200 finishes H' Muon; 8×H100 C1 is already complete in parallel. **Read B1/C1 from on-disk `metrics.jsonl`; write `p21_winners.env`.** |
+| 2.39+  | C1 readout declares the MoE pair_policy default for D1. |
+| 2.39+  | 8×H100 → B2-no-RoPE confirm (10 cells from winner overrides). |
+| 2.39+  | 2×H200 → B2-partial-RoPE confirm (5 cells from winner overrides). |
+| 2.60+  | Both B2 confirms finish. **MILESTONE: Phase B closed; v2.1 winner tuple declared.** |
+| 2.71   | 4×H200 finishes A3 K-curve I; all roles wait until B2 and A3 gates are satisfied. |
+| 2.71+  | All three roles launch D1 modulo-7 shards into one shared result dir. |
+| 9.31+  | D1 finishes. **MILESTONE: D-gate decision.** delta = Muon - Coupled at own-best LR per optimizer. Commission iff delta_p50 > 1.5 × pooled_seed_std AND bootstrap CI direction stable. |
+| 9.31+  | If D-positive: 4×H200 -> E1 350M MLA; 8×H100 -> D3 paired LoRA-rank; 2×H200 -> D4 P_factff. |
+| 26.21+ | E1 finishes (if commissioned). Phase 2.1 complete. |
 
 ### Phase-2.1 dependencies
 
-- **A independent**: A1 (R_prod), A2 / A3 (R_abl) run on their own rigs.
+- **A independent**: A1/A3-I run on the 4×H200 role before D1.
 - **B → D1**: D1 launches with `qk_coupling.no_rope_policy = <B no-RoPE winner>`,
   `qk_coupling.partial_rope_policy = <B partial-RoPE winner>`. Cannot launch
   before T = 2.60.
 - **C → D1**: D1 launches with `pair_policy = <C winner>`. Cannot launch
-  before T = 4.43.
-- **D1 launch gate**: `T_D1_launch = max(R_prod free, Phase B done, Phase C done) = max(2.71, 2.60, 4.43) = 4.43`.
-- **D-gate**: at T = 11.03, commission E1 + D3 + D4 iff `delta_p50 > 1.5 × pooled_seed_std`
+  before the on-disk C1 readout exists.
+- **D1 launch gate**: all roles wait for `b2_no_rope.done`,
+  `b2_partial_rope.done`, and `a3.done` under `$GLOBAL/phase2.1-control/done/`.
+- **D-gate**: commission E1 + D3 + D4 iff `delta_p50 > 1.5 × pooled_seed_std`
   with stable bootstrap CI sign. Otherwise stop; headline reframes per
   `suggestion.md §0`.
 
 ### Pre-launch hygiene (Phase 2.1 specific)
 
-1. `git pull` for the Phase-2.1 code: `optim/coupled_muon.py` `qk_coupling`
-   dispatch (3-key dict), `optim/factory.py` `pair_policy` enum,
-   `configs/base.yaml` defaults (Q-K policy preserves Phase-1 bitwise),
-   `configs/ladder/H_prime_partial_rope.yaml` (new rung), new tests.
+1. Offline launch is the default. The one-line payload writes
+   `phase21_materialize.py` and `phase21_orchestrate.py` into
+   `$GLOBAL/phase2.1-control/bin` on the remote node, then runs from the
+   current repo root. Use `--no-skip-git-pull` only on a node that can safely
+   refresh the repo.
 2. Run **all** new and affected tests on the cluster:
    ```
    uv run pytest tests/test_qk_coupling_dispatch.py \
@@ -241,7 +261,8 @@ R_screen is the global critical path at ~4.12 rig-days through Phase B + C.
 6. **Smoke configs** (`configs/smoke/*.yaml`) override
    `pair_factor_ratio_interval_tokens: 0` so the new base.yaml default does
    not add cost to smoke runs. Verify these overrides still load post-`git pull`.
-7. **Phase-B B1 → B2 launch coupling**: at T = 2.39, query W&B for the
-   no_rope_winner and partial_rope_winner. Use `--override` at B2 launch to
-   bake them in. The same overrides go into the D1 launch at T = 4.43 plus
-   the C1 pair_policy winner.
+7. **Phase-B B1 -> B2 launch coupling**: do not use W&B as a gate. Read
+   completed cell directories from disk (`config.yaml`, `metrics.jsonl`,
+   `stdout.log`) and generate JSONL with explicit overrides. B2 no-RoPE must
+   carry separate C/D best LRs; D1/D3/D4/E1 carry both qk winners plus the C1
+   `pair_policy`.
