@@ -192,6 +192,12 @@ class Orchestrator:
         if self.args.dry_run:
             return
         env = {**os.environ, "WANDB_MODE": os.environ.get("WANDB_MODE", "offline")}
+        repo_src = str(self.repo_root / "src")
+        env["PYTHONPATH"] = (
+            repo_src
+            if not env.get("PYTHONPATH")
+            else repo_src + os.pathsep + env["PYTHONPATH"]
+        )
         subprocess.run(cmd, cwd=self.repo_root, env=env, check=True)
 
     def mark_done(self, key: str, *, extra: str = "") -> None:
