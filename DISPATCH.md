@@ -97,6 +97,11 @@ of result directories. The run_id hash is cfg+seed, so D1 can be split across
 machines as long as every shard uses the same materialized JSONL and
 `--results-dir`.
 
+**Current strict-plan state (2026-05-25)**: no filler or speculative D1 work is
+active. The 8×H100 and 2×H200 are running the original B2 confirmation work.
+The 4×H200 has completed its original A1/A3-I work and is intentionally idle
+until both B2 confirmations complete. D1 remains planned but **not launched**.
+
 Control artifacts:
 - `$GLOBAL/phase2.1-control/p21_winners.{json,env}`: on-disk B/C readout.
 - `$GLOBAL/phase2.1-control/jobs/p21_*.jsonl`: generated launch JSONLs.
@@ -115,11 +120,11 @@ Generate the three pasteable one-line commands from the repo root with:
 | 5 | `phaseC_pair_policy_lr` | C1 | 45 | 8×H100 | `phase2.1-rigB-c-pair-policy/` | ✅ done 45/45, on-disk readout for B2/D1 | ~24 h | `coupled-muon-pair-policy-lr` (offline; sync optional) |
 | 6 | `phaseB_qk_partial_rope_Hprime` | B1 | 48 | 2×H200 | `phase2.1-rigB-b-qk-partial-rope-Hprime/` | ✅ done 48/48, on-disk readout for B2 | ~36 h | `coupled-muon-qk-policy` (offline; sync optional) |
 | 7 | `phaseB_muon_baseline_Hprime` + top-up | B1 | 15 | 2×H200 | `phase2.1-rigB-b-muon-baseline-Hprime/` | ✅ done 15/15, on-disk readout for B2 | >10 h | `coupled-muon-qk-policy` (offline; sync optional) |
-| 8 | `phaseB2_confirm_no_rope` | B2 | 10 | 8×H100 | `phase2.1-rigB-b2-no-rope-confirm/` | launch via `h100` role after materializing winners | ~3.3 h | `coupled-muon-qk-policy-confirm` |
-| 9 | `phaseB2_confirm_partial_rope` | B2 | 5 | 2×H200 | `phase2.1-rigB-b2-partial-rope-confirm/` | launch via `h200x2` role after materializing winners | ~6.5 h | `coupled-muon-qk-policy-confirm` |
-| 10 | `adamw_equalization_I` | A1 | 10 | 4×H200 | `phase2.1-rigA-a1-adamw-I-topup/` | launch via `h200x4` role, then A3-I | ~1.25 rig-days est. | `coupled-muon-moe-anchor-adamw` (offline) |
-| 11 | `phaseA3_k_curve_minimal_I` | A3 | 9 | 4×H200 | `phase2.1-rigA-a3-kcurve-I/` | chained after #10 in `h200x4` role | ~1.46 rig-days est. | `coupled-muon-k-curve-I` (offline) |
-| 12 | `mla_lr_grid` | D1 | 45 | all three | `phase2.1-rigA-d1-mla/` | gated on B2 + A3-I; modulo-7 shards | ~6.6 rig-days est. | `coupled-muon-mla` |
+| 8 | `phaseB2_confirm_no_rope` | B2 | 10 | 8×H100 | `phase2.1-rigB-b2-no-rope-confirm/` | ▶ running via original `h100` role | ~3.3 h | `coupled-muon-qk-policy-confirm` |
+| 9 | `phaseB2_confirm_partial_rope` | B2 | 5 | 2×H200 | `phase2.1-rigB-b2-partial-rope-confirm/` | ▶ running via original `h200x2` role | ~6.5 h | `coupled-muon-qk-policy-confirm` |
+| 10 | `adamw_equalization_I` | A1 | 10 | 4×H200 | `phase2.1-rigA-a1-adamw-I-topup/` | ✅ done 10/10 | ~1.25 rig-days est. | `coupled-muon-moe-anchor-adamw` (offline) |
+| 11 | `phaseA3_k_curve_minimal_I` | A3 | 9 | 4×H200 | `phase2.1-rigA-a3-kcurve-I/` | ✅ done 9/9 | ~1.46 rig-days est. | `coupled-muon-k-curve-I` (offline) |
+| 12 | `mla_lr_grid` | D1 | 45 | all three | `phase2.1-rigA-d1-mla/` | ⏸ not launched; gated on both B2 confirmations | ~6.6 rig-days est. | `coupled-muon-mla` |
 | 13 | `phaseD3_lora_rank_paired_conditional` | D3 | 30 | 8×H100 | `phase2.1-rigB-d3-lora-rank/` | conditional on D-gate positive | ~1.22 rig-days est. | `coupled-muon-lora-rank-paired` |
 | 14 | `imposed_factff` | D4 | 12 | 2×H200 | `phase2.1-rigC-d4-factff/` | conditional on D-gate positive | ~0.65 rig-days est. | `coupled-muon-imposed-factff` |
 | 15 | `mla_scaling_350m` | E1 | 30 | 4×H200 | `phase2.1-rigA-e1-mla-350m/` | conditional on D-gate positive | ~16.9 rig-days est. | `coupled-muon-mla-350m` |
@@ -149,18 +154,20 @@ Phase C  pair_policy localization  ✅ COMPLETE (#5, 45/45; on-disk readout)
   -> MoE pair_policy default is now materializable from on-disk metrics.
 
 Next:
-  h100   -> materialize winners if needed -> B2 no-RoPE -> wait B2/A3 -> D1 residues 0,1,2,3 -> D3 if D-positive.
-  h200x2 -> materialize winners if needed -> B2 partial-RoPE -> wait B2/A3 -> D1 residue 4 -> D4 if D-positive.
-  h200x4 -> A1 AdamW@I -> A3 K-curve-I -> wait B2 -> D1 residues 5,6 -> E1 if D-positive.
+  h100   -> finish B2 no-RoPE -> wait for B2 partial -> D1 residues 0,1,2,3 -> D3 if D-positive.
+  h200x2 -> finish B2 partial-RoPE -> wait for B2 no-RoPE -> D1 residue 4 -> D4 if D-positive.
+  h200x4 -> wait idle after completed A1/A3-I -> D1 residues 5,6 -> E1 if D-positive.
 
 Blocked:
-  D1 O_mla (45) - blocked on both B2 confirmations and A3-I.
+  D1 O_mla (45) - blocked on both B2 confirmations; A3-I is already complete.
   D3 / D4 / E1 - blocked on D1 + D-gate.
 ```
 
 **Work split**: B1/C1 readout is done by `scripts/phase21_materialize.py`.
 Every launch first runs `scripts/filter_unfinished_jobs.py` against the exact
-target `--results-dir`; a restart should not duplicate completed cells.
+target `--results-dir`; a restart should not duplicate completed cells. The
+4×H200 node is currently idle by design under the original gated protocol; do
+not launch D1, D3, D4, E1, or filler work before an explicit plan change.
 
 **H'-Muon (#7) must be read from disk before Phase-B partial-RoPE decision**:
 it is the plain-Muon baseline the H' `partial_rope_winner` is judged against
