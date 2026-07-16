@@ -3,6 +3,10 @@
 Hand-built scientific report covering the Coupled Muon v2 dense-architecture
 ladder results. Audience: pre-training specialists; no Muon recap.
 
+See `RESULTS.md` for where results live on disk, how to query wandb, and which
+wandb project maps to which plan step (including Phase 2.1 work not yet in any
+report).
+
 ## Three-command rebuild
 
 ```
