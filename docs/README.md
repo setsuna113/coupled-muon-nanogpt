@@ -50,6 +50,9 @@ docs/
     make_all.py      runs every fig*.py + tab*.py
   tables/            (gitignored regenerated tex snippets)
   data/              parquet snapshots, committed
+  data/histories/    per-run W&B curves (val loss, train loss every 100 steps,
+                     max attention logit) for all 16 projects, one parquet per
+                     project; archived 2026-09-02 by scripts/fetch_wandb_histories.py
   build/             latexmk output (gitignored)
 ```
 
