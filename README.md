@@ -16,7 +16,8 @@ Headline results (final val loss, own-best LR per optimizer, paired seeds, 95% C
 | Setting | Coupled − Muon | Coupled − AdamW |
 |---|---|---|
 | Dense, full RoPE (A0 LLaMA-60M, B, G, H) | −0.008 … −0.024 nats, all CIs exclude 0 | −0.12 … −0.29 |
-| Dense, learned position (C, D, E) | +0.055 / +0.066 / tie with the legacy flat-2D Q–K path (mostly an LR-window artefact of the divergence-flag rule); −0.011 … −0.024 at own-best LR with per-head Q–K coupling, probe-flagged runs admitted, n=3 (FINAL_STATUS §4.5) | −0.12 |
+| Dense, null cells (E Karpathy vanilla; H′ = H with 50% RoPE, modded-nanogpt-faithful) | E −0.002 [−0.003, +0.001] (n=3); H′ −0.003 [−0.004, +0.001] (`partial_rope_split`, n=5) — both CIs bracket zero | −0.12 (E) |
+| Dense, learned position (C, D, E) | +0.066 / +0.055 / tie with the legacy flat-2D Q–K path (mostly an LR-window artefact of the divergence-flag rule); −0.011 … −0.024 at own-best LR with per-head Q–K coupling when probe-flagged runs are admitted, n=3 — an unconfirmed lead, not a claim (FINAL_STATUS §4.5) | −0.12 |
 | Sparse MoE (I, I′, J, K, L, M; 5B tokens) | −0.007 … −0.016, no cell diverged | −0.09 … −0.10 |
 | MLA rung O (natively factored KV) | **+0.003 [+0.003, +0.005]** — D-gate negative; factored-KV hypothesis falsified | −0.10 |
 
@@ -51,16 +52,23 @@ partner's current value), and stage 2 re-orthogonalises `X` so the usual
 ## Quickstart
 
 ```bash
-# 1. Install (uv recommended)
+# 1. Install (uv recommended). The wrapper scripts below call bare `python` /
+#    `torchrun`, so activate the venv first (`source .venv/bin/activate`) or
+#    prefix each command with `uv run`. The torch pin is cu128 (Linux, NVIDIA);
+#    to read the code or rebuild figures elsewhere: `uv sync --extra docs --no-install-package torch`.
 uv sync --all-extras
 
-# 2. Tokenize FineWeb-Edu into uint16 shards (~30 min, one-time)
-bash scripts/prepare_data.sh
+# 2. Synthetic shards for the smoke configs (~1 min; they read data/synthetic_smoke)
+bash scripts/prepare_synthetic.sh
 
 # 3. Smoke test on 1×4090 (5 min)
 bash scripts/smoke_4090.sh configs/smoke/tiny_dev.yaml
 
-# 4. Production run on 2×H200
+# 4. Tokenize FineWeb-Edu into uint16 shards for the ladder configs
+#    (5B tokens by default: hours, ~10 GB, one-time)
+bash scripts/prepare_data.sh
+
+# 5. Production run on 2×H200
 bash scripts/train_2xh200.sh configs/ladder/A0_llama60m.yaml
 ```
 
@@ -158,9 +166,24 @@ Sweep YAMLs that vary axes the fallback group formula doesn't capture (e.g.
 OmegaConf interpolation; see `configs/sweeps/pair_ablation.yaml` for the
 pattern.
 
+## Provenance
+
+- **Author.** Liu Yuechen, sole author of the algorithm, the harness, every
+  experiment, the analysis and both reports (50 commits, May–July 2026;
+  contribution breakdown in `docs/PROJECT_SUMMARY.md` §3).
+- **Algorithm.** Coupled Muon v1/v2 was designed by the author in an earlier
+  private repository (`QZ/Coupled_muon`), where it produced the LLaMA-60M
+  result that motivated this study. The kernel was ported into
+  `src/coupled_muon_nanogpt/optim/coupled_muon.py` and extended here with the
+  Newton–Schulz coefficient and LR-prefactor policies, `final_polish`, the
+  multi-head / partial-RoPE / per-head Q–K dispatcher, and the MLA and FactFF
+  pairs. The Newton–Schulz kernel itself descends from KellerJordan/Muon.
+
 ## References
 
-- Design doc: `experiment.md` (top of this repo).
-- Optimizer source: `/home/lyc/dev/QZ/Coupled_muon/coupled_muon_v2.py` (lifted verbatim).
+- Design doc: `experiment.md` (top of this repo). `suggestion.md`, cited in
+  `experiment.md` §d.7 and several configs, was a private Phase-2 review memo
+  that was never committed; the items it scopes are described in
+  `experiment.md` §d.7 and `docs/FINAL_STATUS.md` §4.
 - Bernstein & Newhouse, *Old Optimizer, New Norm* (arXiv 2409.20325).
 - Liu et al., *Moonlight* (arXiv 2502.16982).

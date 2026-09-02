@@ -49,7 +49,6 @@ def test_default_routes_routers_to_muon():
 
     groups = classify_parameters(model, n_heads=4)  # uses default True
 
-    router_set = {id(p) for p in routers}
     muon_set = {id(p) for p in groups.muon_2d}
     adamw_set = {id(p) for p in groups.router_params}
 

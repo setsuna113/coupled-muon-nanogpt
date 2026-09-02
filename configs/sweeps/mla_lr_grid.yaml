@@ -1,4 +1,4 @@
-# status: phase2.1-D1 — active D1 sweep. Bake the Phase B winners and Phase C
+# status: phase2.1-D1-COMPLETE — ran 2026-07-04..13 (51 W&B runs in coupled-muon-mla); D-gate NEGATIVE (Coupled − Muon +0.0034), see docs/FINAL_STATUS.md §4.6. Do not relaunch. Historical launch recipe follows:
 # pair_policy default via `--override` at launch time:
 #   --override optimizer.qk_coupling.no_rope_policy=<B no-RoPE winner>
 #   --override optimizer.qk_coupling.partial_rope_policy=<B partial-RoPE winner>

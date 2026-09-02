@@ -1,8 +1,9 @@
 """Token-relative probe scheduler.
 
 Probes are callables `(model, optimizer, ctx) -> dict[str, float | list[float]]`.
-The manager fires each probe when the cumulative token count crosses the next
-multiple of its `interval_tokens`. This decouples logging cadence from step
+The manager fires each probe once at least `interval_tokens` tokens have
+elapsed since its last fire (not aligned to multiples; the first fire is at
+>= `interval_tokens`, never at step 0). This decouples logging cadence from step
 count, so smoke (small batch) and prod (large batch) configs log at comparable
 token-rate.
 """

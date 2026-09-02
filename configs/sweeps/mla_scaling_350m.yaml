@@ -1,4 +1,4 @@
-# status: phase2.1-E1-conditional — CONDITIONAL on Phase D1 (O_mla) positive.
+# status: NEVER LAUNCHED — gated on a positive D-gate, which came out NEGATIVE on 2026-07-13 (docs/FINAL_STATUS.md §4.6); kept as the design record only.
 # D-gate per experiment.md d.7.4: delta_p50 = (Muon_loss − Coupled_loss);
 # commission only if delta_p50 > 1.5 × pooled_seed_std AND bootstrap CI sign stable.
 # Phase-2 stretch — MLA at 350M class for the scaling-trend claim.

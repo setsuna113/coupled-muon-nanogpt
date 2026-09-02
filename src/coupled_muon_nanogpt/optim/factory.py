@@ -1,7 +1,7 @@
 """Optimizer factory: parameter classification + builder.
 
-Adapts the param-classification logic from
-`/home/lyc/dev/QZ/Coupled_muon/__init__.py:136-240` to NanoGPT-style parameter
+Adapts the param-classification logic of the author's prior Coupled-Muon v2
+prototype (private, not part of this repo) to NanoGPT-style parameter
 naming. The model is expected to expose its blocks via a top-level `layers`
 ModuleList, with attention projections named `q_proj`, `k_proj`, `v_proj`,
 `o_proj`, and MLP projections named `up_proj`, `down_proj`, and optionally

@@ -358,9 +358,11 @@ to do if the project restarts.
 ## 8. Reproducing this document
 
 ```
-pip install wandb pandas pyarrow numpy
-WANDB_API_KEY=… python scripts/wandb_status_snapshot.py --fetch docs/data/wandb_all_runs_<date>.parquet
-python scripts/wandb_status_snapshot.py --analyze docs/data/wandb_all_runs_<date>.parquet
+uv sync --extra docs            # or: pip install wandb pandas pyarrow numpy
+WANDB_API_KEY=… uv run --extra docs python scripts/wandb_status_snapshot.py --fetch docs/data/wandb_all_runs_<date>.parquet
+uv run --extra docs python scripts/wandb_status_snapshot.py --analyze docs/data/wandb_all_runs_<date>.parquet
+uv run --extra docs python scripts/wallclock_accounting.py            # §4.7
+WANDB_API_KEY=… uv run --extra docs python scripts/fetch_wandb_histories.py   # per-run curves → docs/data/histories/
 ```
 
 `docs/figures/fetch_all.py` / `fetch_part2.py` + `make_all.py` /

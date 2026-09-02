@@ -22,7 +22,7 @@ uv run python docs/figures/make_all.py               # regenerates every fig + t
 latexmk -pdf -outdir=docs/build docs/report.tex
 ```
 
-The first command installs `matplotlib`, `pyarrow`, `pandas`, `scipy`; the
+The first command installs `matplotlib`, `pyarrow`, `pandas`; the
 second pulls run summaries and downsampled per-step history from the three
 wandb projects (`coupled-muon-A0-repro`, `coupled-muon-ladder`,
 `coupled-muon-ablation`) and writes them to `docs/data/*.parquet` (~50KB

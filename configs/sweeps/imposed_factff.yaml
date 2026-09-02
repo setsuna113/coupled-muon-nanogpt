@@ -1,4 +1,4 @@
-# status: phase2.1-D4-conditional — CONDITIONAL on Phase D1 (O_mla) positive.
+# status: NEVER LAUNCHED — gated on a positive D-gate, which came out NEGATIVE on 2026-07-13 (docs/FINAL_STATUS.md §4.6); kept as the design record only.
 # Only commission after D1 readout: delta_p50 > 1.5 × pooled_seed_std.
 # Phase-2 Tier B3 — Imposed FFN factorisation transfer test.
 # Does CoupledMuon's advantage transfer from NATIVE factor structure

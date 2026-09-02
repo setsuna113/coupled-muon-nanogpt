@@ -3,11 +3,12 @@
 
 \title{Coupled Muon v2 on a Dense Architecture Ladder at 60M Common-Size:\\
 \large Stage~1 (A0 reproduction) and Stage~2 (B--H bridging ladder)}
-\author{Coupled-Muon-NanoGPT working group}
+\author{Liu Yuechen\thanks{Sole author: algorithm, harness, experiments, analysis and both reports. Contribution breakdown in \texttt{docs/PROJECT\_SUMMARY.md} \S3.}}
 \date{Snapshot: 2026-05-19\quad (dense Part~I cache; sparse-MoE interpretation in Part~II)}
 
 \begin{document}
 \maketitle
+\begin{center}\fbox{\parbox{0.92\linewidth}{\small\textbf{Frozen document --- read \texttt{docs/FINAL\_STATUS.md} first.} This report is a snapshot of the 2026-05-19 W\&B cache and was never refreshed; the project closed on 2026-09-02. Work completed after this snapshot --- the coupled-steps K-curve, the Newton--Schulz coefficient-policy grid, the per-head Q--K repair on C/D/E and H$'$, the MoE pair-policy sweep, the 5-seed AdamW@I anchor and the MLA rung (whose pre-registered D-gate came out negative) --- is reported only in \texttt{docs/FINAL\_STATUS.md}, which also corrects two readings here: the C/D ``regression'' is mostly an artefact of the divergence-flag exclusion rule, and the fixed-token gains net out to a wall-clock-neutral result.}}\end{center}
 
 \input{docs/sections/00_abstract.tex}
 \input{docs/sections/01_intro.tex}

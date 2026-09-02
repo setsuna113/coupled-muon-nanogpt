@@ -14,8 +14,8 @@ real work or is approximately a no-op because stage-1 already produces a
 near-orthogonal output. If σ_max(post-stage-1) ≈ 1 across coupled pairs at
 the operating point, `final_polish=False` should match training behavior.
 
-Cost: one extra coupled-NS step worth of matmuls per probe fire — negligible at
-the d.3 cadence. Healthy band per Bernstein-Newhouse / Polar Express: ‖X‖_F in
+Cost: ~2× a full stage-1 pass (both sides) plus two short power iterations
+per probe fire — negligible at the d.3 cadence. Healthy band per Bernstein-Newhouse / Polar Express: ‖X‖_F in
 roughly (0.5, 5.0); values outside flag divergence.
 
 Must be registered with `needs_grads=True` so it fires before optimizer.step()
@@ -76,8 +76,12 @@ def _shadow_trace_pair(
     is_qk: bool,
 ) -> dict[str, Any]:
     """Eager-fp32 re-run of the 2-D coupled-NS inner loop with per-iteration
-    ‖X‖_F logged. Mirrors `coupled_newtonschulz5_A` / `_B` exactly. Operates on
-    the flat 2-D shape (no multi-head reshape) — sufficient for divergence
+    ‖X‖_F logged. Re-runs the same recurrence with the canonical Bernstein
+    triple hardcoded; it does NOT read `optimizer._coeffs_stage1`, so under
+    ns_coefficients=polar_express|cesista it would trace the Bernstein iteration
+    rather than the one the optimizer ran (every sweep that enabled this probe
+    used bernstein, so the committed series are consistent). Operates on the
+    flat 2-D shape (no multi-head reshape) — sufficient for divergence
     detection."""
     a, b, c = (3.4445, -4.7750, 2.0315)
 

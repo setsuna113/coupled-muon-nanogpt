@@ -1,3 +1,4 @@
+# status: NEVER LAUNCHED — gated on a positive D-gate, which came out NEGATIVE on 2026-07-13 (docs/FINAL_STATUS.md §4.6). The 15-run coupled-muon-lora-rank project is the earlier UNPAIRED Coupled-only kv-rank sweep (lora_rank_sweep.yaml), not this one.
 # Phase-2.1 D3 — paired LoRA-rank sweep at O_mla. CONDITIONAL on D1 positive
 # (D-gate: delta_p50 > 1.5 × pooled_seed_std). Supersedes the Phase-2
 # lora_rank_sweep.yaml which was unpaired and could not support a Coupled-

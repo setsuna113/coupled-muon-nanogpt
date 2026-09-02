@@ -50,10 +50,12 @@ def estimate_per_expert_snr(
     and expert, compute the cosine of each mini-batch gradient to the mean and
     the SNR of the gradient norm distribution."""
     device = device or next(model.parameters()).device
+    was_training = model.training
     model.eval()  # disable dropout (unaffected by autograd)
 
     moe_layers = [m for m in model.modules() if isinstance(m, MoEFFN)]
     if not moe_layers:
+        model.train(was_training)
         return {"_note": "no MoEFFN modules found in model — dense run"}
 
     # Storage: per-layer per-expert list of flat grad tensors.
@@ -61,7 +63,7 @@ def estimate_per_expert_snr(
         [[] for _ in range(len(layer.experts))] for layer in moe_layers
     ]
 
-    for k in range(num_micro):
+    for _ in range(num_micro):
         x, y = loader.next_batch()
         x = x.to(device)
         y = y.to(device)
@@ -100,6 +102,7 @@ def estimate_per_expert_snr(
                 "mean_grad_norm": float(mean_norm),
             }
         out[f"layer.{li}"] = layer_out
+    model.train(was_training)
     return out
 
 

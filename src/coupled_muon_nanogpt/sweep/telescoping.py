@@ -2,6 +2,9 @@
 
 Given the (lr, val_loss) results at width N, emit the centered halved-spacing
 grid for width 2N. Trivial but worth codifying so the sweep config can call it.
+
+Unused at project close — kept as a reference implementation of the Essential
+AI telescoping protocol; no config or script calls it.
 """
 from __future__ import annotations
 

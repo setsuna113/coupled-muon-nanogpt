@@ -308,7 +308,7 @@ class CoupledMuon_v2(torch.optim.Optimizer):
         )
 
         all_params = []
-        for param_A, param_B, n_heads, is_qk in coupled_pairs:
+        for param_A, param_B, _pair_heads, _pair_is_qk in coupled_pairs:
             all_params.extend([param_A, param_B])
         all_params.extend(muon_params)
         all_params.extend(adamw_params)
@@ -323,6 +323,9 @@ class CoupledMuon_v2(torch.optim.Optimizer):
         # Stage-2 (final polish) toggle. See class docstring; ablated per d.4.
         self.final_polish = bool(final_polish)
         self.use_multi_head = use_multi_head
+        # Constructor kwarg. (The pair loop above used to shadow this name, so this
+        # attribute previously held the LAST coupled pair's per-pair head count;
+        # nothing reads it either way — per-pair counts live in self.state.)
         self.n_heads = n_heads
         self.ns_dtype = ns_dtype
         # crossfade configuration
@@ -469,7 +472,12 @@ class CoupledMuon_v2(torch.optim.Optimizer):
             denom = max(B, 1)
             adjusted_ratio = 0.2 * math.sqrt(A / denom)
         elif policy == "cesista":
-            # K is the stage-1 step count; falls back to ns_steps for plain Muon paths.
+            # K is the stage-1 (coupled) step count and is used for EVERY parameter
+            # this optimizer updates — including the plain-Muon block and the
+            # coupled_steps==0 path, where it clamps to 1. optim/muon.py uses
+            # ns_steps for K instead, so `cesista` prefactors would differ between
+            # muon and coupled_muon_v2 runs when coupled_steps != ns_steps. Never
+            # exercised: the lr_prefactor sweep was not launched (FINAL_STATUS.md).
             K = max(int(self.coupled_steps), 1)
             adjusted_ratio = 0.2 * math.sqrt(max(A, B)) / (1.0 + math.log(K + 1))
         else:
@@ -590,8 +598,15 @@ class CoupledMuon_v2(torch.optim.Optimizer):
     def _qk_partial_rope_split_stage1(self, g_A_eff, g_B_eff, param_A, param_B, state_A, state_B, n_heads, ns_steps):
         """Split per-head head_dim into RoPE'd [0:rotary_dim] and non-RoPE
         [rotary_dim:] slices. RoPE'd slice → legacy 2-D rotation-pair coupled
-        NS. Non-RoPE slice → plain Muon (no coupling on the non-RoPE channels;
-        the safe choice per review v3 §"partial_rope_split semantics").
+        NS. Non-RoPE slice → uncoupled NS (no partner coupling; the safe choice per
+ review v3 §"partial_rope_split semantics"). NOTE the NS budget: with
+ final_polish=True this branch pre-applies coupled_steps + ns_steps passes
+ AND the outer stage-2 pass in step() polishes the concatenated iterate
+ again, so the non-RoPE channels receive coupled_steps + 2*ns_steps NS
+ passes — unlike _qk_qk_off_stage1, which returns raw grads under
+ final_polish. Retained as-is because the H' partial_rope_split results
+ in docs/FINAL_STATUS.md §4.5 were produced with it; changing it is a
+ new experiment, not a cleanup.
         """
         HD, I = param_A.shape
         HD_B, I_B = param_B.shape
@@ -714,7 +729,7 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                 # When coupled_steps == 0 or coupling globally disabled, the contract
                 # (base.yaml: "0 ⇒ plain Muon path inside CoupledMuon_v2") is plain Muon.
                 # Skip the partner-aware kernels entirely — calling them with steps=0
-                # still pre-divides by ‖XB‖_F (lines 56, 93), producing a degraded
+                # still pre-divides by the partner-product norm inside coupled_newtonschulz5_A/_B, producing a degraded
                 # update that is *neither* coupled-NS nor plain Muon.
                 if self.coupled_steps > 0 and self.enable_coupled:
                     if is_qk and self.use_multi_head:
@@ -748,9 +763,11 @@ class CoupledMuon_v2(torch.optim.Optimizer):
                         u_A_c = coupled_newtonschulz5_A(g_A_eff, param_B.data, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
                         u_B_c = coupled_newtonschulz5_B(g_B_eff, param_A.data, steps=self.coupled_steps, dtype=self.ns_dtype, coeffs=self._coeffs_stage1)
 
-                    # Stage-1 norm capture: per-pair Frobenius norm of the
-                    # post-coupled-NS iterate, cheap (~one .norm() call). Probe
-                    # reads from state every `stage1_norm_interval_tokens`.
+                    # Stage-1 norm capture, kept because
+                    # tests/test_final_polish_toggle.py asserts it. No probe reads it —
+                    # the `stage1_norm_interval_tokens` key once planned here was never
+                    # implemented. Under qk_off + final_polish=True the value is the
+                    # momentum-buffered gradient norm (that path returns g_eff as-is).
                     state_A["stage1_frob_norm"] = u_A_c.detach().float().norm().item()
                     state_B["stage1_frob_norm"] = u_B_c.detach().float().norm().item()
 
