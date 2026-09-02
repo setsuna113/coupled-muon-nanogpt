@@ -162,7 +162,8 @@ added a three-flag `qk_coupling` dispatcher and swept the non-RoPE policies.
 **Protocol readout (probe-flagged runs excluded):** on C/D/E every Coupled
 policy except `headwise_no_rope` is flagged 3/3 at lr ≥ 3e-3 and so is read at
 lr 1e-3 (≈3.426, identical to the legacy fallback — `current_flat2d_fallback`
-is bitwise the old path and `qk_off` is indistinguishable from it).
+reproduces the old path to 1e-6 by test, and `qk_off` is indistinguishable
+from it in outcome).
 `headwise_no_rope` survives at 3e-3–1e-2 in 1–3 of 3 seeds and reads
 C 3.353 (n=1), D 3.356 (n=1), E 3.354 (n=2), i.e. **below the ladder Muon best
 (C 3.362, D 3.373, E 3.428)**. B2 5-seed confirmation at the B1 winner

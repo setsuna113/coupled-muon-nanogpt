@@ -42,8 +42,9 @@ head, `W_up W_down` — as pairs `(A, B)` and computes a two-stage update
 so that `X B → polar(G_A B)` (the *product* moves in its polar direction, using the
 partner's current value), and stage 2 re-orthogonalises `X` so the usual
 `lr·0.2·√max(rows, cols)` scaling applies. `coupled_steps=0` recovers plain Muon
-bitwise. Implementation: `src/coupled_muon_nanogpt/optim/coupled_muon.py`; pair
-classification: `optim/factory.py`.
+(tested to 1e-4 in `tests/test_coupled_zero_equals_muon.py`). Implementation:
+`src/coupled_muon_nanogpt/optim/coupled_muon.py`; pair classification:
+`optim/factory.py`.
 
 ## Quickstart
 
