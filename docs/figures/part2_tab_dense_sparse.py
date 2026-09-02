@@ -13,7 +13,6 @@ from _common import DATA_DIR, RUNG_ORDER, write_table
 from _stats import best_lr_per_arm, paired_bootstrap
 from part2_analysis import dedupe_runs, load_part2_summary, stage3_rows, valid_final_rows
 
-
 SPARSE_RUNG_ORDER = ["I", "I'", "J", "K"]
 
 

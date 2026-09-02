@@ -14,10 +14,9 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Sequence
-
 
 GLOBAL_DEFAULT = Path("/inspire/hdd/global_user/yanjunchi-24040/yancheng")
 CONTROL_NAME = "phase2.1-control"

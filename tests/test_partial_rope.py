@@ -1,15 +1,13 @@
 """Stage 3.5: partial RoPE — modded-nanogpt's rotary_dim < head_dim pattern."""
 from __future__ import annotations
 
-import warnings
-
 import pytest
 import torch
+from omegaconf import OmegaConf  # noqa: F401
 
 from coupled_muon_nanogpt.model.components import RotaryEmbedding
 from coupled_muon_nanogpt.model.transformer import GPT, BlockConfig, GPTConfig
 from coupled_muon_nanogpt.optim.factory import build_optimizer
-from omegaconf import OmegaConf  # noqa: F401
 
 
 def test_rotary_embedding_partial_passes_through_tail():

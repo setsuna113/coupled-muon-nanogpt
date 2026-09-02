@@ -14,7 +14,6 @@ import torch
 from coupled_muon_nanogpt.optim.factory import build_optimizer
 from coupled_muon_nanogpt.train import build_model, load_config
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LADDER_DIR = REPO_ROOT / "configs" / "ladder"
 SMOKE_DIR = REPO_ROOT / "configs" / "smoke"

@@ -7,15 +7,13 @@ ProbeManager's pre-step / post-step partitioning is correct.
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
+from omegaconf import OmegaConf
 
-from coupled_muon_nanogpt.model.moe import MoEConfig, MoEFFN
 from coupled_muon_nanogpt.model.transformer import GPT, BlockConfig, GPTConfig
-from coupled_muon_nanogpt.optim.factory import build_optimizer, classify_parameters
+from coupled_muon_nanogpt.optim.factory import build_optimizer
 from coupled_muon_nanogpt.probes.manager import ProbeManager
 from coupled_muon_nanogpt.probes.moe_load import moe_load_probe
 from coupled_muon_nanogpt.probes.ns_internal import ns_internal_probe
-from omegaconf import OmegaConf
 
 
 def _moe_model() -> GPT:

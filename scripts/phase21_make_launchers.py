@@ -13,7 +13,6 @@ import base64
 import shlex
 from pathlib import Path
 
-
 GLOBAL_DEFAULT = "/inspire/hdd/global_user/yanjunchi-24040/yancheng"
 ROLES = ("h100", "h200x2", "h200x4")
 

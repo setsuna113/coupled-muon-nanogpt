@@ -25,7 +25,6 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
-
 PT1_LRS = (3.0e-3, 1.0e-2, 3.0e-2)
 LOW_EDGE_LR = 1.0e-3
 HIGH_EDGE_LR = 1.0e-1

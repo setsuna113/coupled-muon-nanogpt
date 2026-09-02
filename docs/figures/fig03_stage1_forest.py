@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import DATA_DIR, OPT_COLOR, OPT_LABEL, save_fig, setup_mpl
+from _common import DATA_DIR, OPT_COLOR, save_fig, setup_mpl
 from _stats import best_lr_per_arm, paired_bootstrap
 
 

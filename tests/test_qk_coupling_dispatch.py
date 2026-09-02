@@ -30,11 +30,10 @@ from __future__ import annotations
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 
 from coupled_muon_nanogpt.model.transformer import GPT, BlockConfig, GPTConfig
 from coupled_muon_nanogpt.optim.factory import build_optimizer
-from omegaconf import OmegaConf
-
 from tests._legacy_optimizer_helpers import build_legacy_nonfull_flat2d_optimizer
 
 

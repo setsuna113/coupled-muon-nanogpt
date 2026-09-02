@@ -1,7 +1,6 @@
 import math
+
 import torch
-import os
-from datetime import datetime
 
 
 # This code snippet is a modified version adapted from the following GitHub repository:
@@ -334,7 +333,7 @@ class CoupledMuon_v2(torch.optim.Optimizer):
         # to the right device on first use). When the policy is `bernstein`,
         # we deliberately keep coeffs=None so the kernel falls back to the
         # hardcoded Phase-1 path — bitwise-identical numerics.
-        from .ns_coefficients import get_coefficients, coefficients_to_tensor
+        from .ns_coefficients import coefficients_to_tensor, get_coefficients
 
         self.ns_coefficients_policy = str(ns_coefficients).lower()
         self.ns_gram_form = bool(ns_gram_form)

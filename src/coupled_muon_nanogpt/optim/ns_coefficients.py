@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import torch
 
-
 _BERNSTEIN_TRIPLE: tuple[float, float, float] = (3.4445, -4.7750, 2.0315)
 
 

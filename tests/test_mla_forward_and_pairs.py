@@ -10,7 +10,6 @@ Validates:
 """
 from __future__ import annotations
 
-import pytest
 import torch
 
 from coupled_muon_nanogpt.model.transformer import GPT, BlockConfig, GPTConfig

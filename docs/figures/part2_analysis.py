@@ -7,12 +7,11 @@ explicitly, and Phase-2 ablation axes stay in the grouping key.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
-
 from _common import (
     DATA_DIR,
     MOE_RUNG_ORDER,

@@ -16,7 +16,6 @@ from coupled_muon_nanogpt.model.attention import MultiLatentAttention  # noqa: F
 from coupled_muon_nanogpt.optim.factory import build_optimizer, classify_parameters
 from coupled_muon_nanogpt.train import build_model, load_config
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LADDER_DIR = REPO_ROOT / "configs" / "ladder"
 

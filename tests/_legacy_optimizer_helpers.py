@@ -16,11 +16,8 @@ take their pre-refactor defaults from configs/base.yaml.
 """
 from __future__ import annotations
 
-from typing import Any
-
 import torch
 import torch.nn as nn
-from omegaconf import OmegaConf
 
 from coupled_muon_nanogpt.optim.coupled_muon import CoupledMuon_v2
 from coupled_muon_nanogpt.optim.factory import classify_parameters

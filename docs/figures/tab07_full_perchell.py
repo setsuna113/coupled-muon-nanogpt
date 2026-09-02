@@ -8,8 +8,8 @@ Coupled-vs-Muon medians without opening W&B.
 """
 from __future__ import annotations
 
-import sys
 import math
+import sys
 from pathlib import Path
 
 import pandas as pd

@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -19,12 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import DATA_DIR, PART2_PROJECTS
 from _fetch import history_df, summary_df
 from part2_analysis import (
+    best_lr_run_rows,
     completion_table,
     dedupe_runs,
     missing_cells,
     planned_cells,
     stage3_rows,
-    best_lr_run_rows,
     valid_final_rows,
 )
 
@@ -61,7 +61,7 @@ def _write_manifest(summary: pd.DataFrame, errors: dict[str, str]) -> None:
     discarded.to_csv(DATA_DIR / "part2_discarded_duplicates.csv", index=False)
 
     manifest = {
-        "snapshot_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "snapshot_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "projects": completion.to_dict(orient="records"),
         "fetch_errors": errors,
         "missing_cells_csv": "docs/data/part2_missing_cells.csv",
@@ -72,7 +72,7 @@ def _write_manifest(summary: pd.DataFrame, errors: dict[str, str]) -> None:
         ),
     }
     (DATA_DIR / "part2_manifest.json").write_text(json.dumps(manifest, indent=2))
-    print(f"  wrote docs/data/part2_manifest.json")
+    print("  wrote docs/data/part2_manifest.json")
     print(f"  wrote docs/data/part2_summary.parquet ({len(summary)} raw rows)")
     print(f"  wrote docs/data/part2_summary_deduped.parquet ({len(kept)} kept, {len(discarded)} duplicate rows)")
     print(f"  wrote docs/data/part2_missing_cells.csv ({len(missing)} missing final cells)")

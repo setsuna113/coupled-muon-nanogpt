@@ -15,11 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _common import (
     DATA_DIR,
-    LONG_TO_SHORT,
     PROJECT_ABLATION,
     PROJECT_STAGE1,
     PROJECT_STAGE2,
-    RUNG_ORDER,
 )
 from _fetch import history_df, manifest_update, summary_df
 from _stats import best_lr_per_arm

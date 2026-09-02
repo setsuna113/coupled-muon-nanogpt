@@ -19,7 +19,7 @@ import torch
 from omegaconf import OmegaConf
 
 from coupled_muon_nanogpt.model.transformer import GPT, BlockConfig, GPTConfig
-from coupled_muon_nanogpt.optim.factory import build_optimizer, classify_parameters
+from coupled_muon_nanogpt.optim.factory import build_optimizer
 
 
 def _build_dense_model() -> GPT:

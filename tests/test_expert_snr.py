@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
 
 from coupled_muon_nanogpt.model.transformer import GPT, BlockConfig, GPTConfig
 from coupled_muon_nanogpt.probes.expert_snr import estimate_per_expert_snr

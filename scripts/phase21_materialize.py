@@ -15,12 +15,12 @@ import re
 import shlex
 import statistics
 import time
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from omegaconf import OmegaConf
-
 
 GLOBAL_DEFAULT = Path("/inspire/hdd/global_user/yanjunchi-24040/yancheng")
 CONTROL_NAME = "phase2.1-control"

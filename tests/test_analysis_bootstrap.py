@@ -5,8 +5,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pytest
-import torch
 from omegaconf import OmegaConf
 
 from coupled_muon_nanogpt.analysis.bootstrap import aggregate_runs, bootstrap_median_ci

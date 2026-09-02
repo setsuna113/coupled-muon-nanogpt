@@ -14,14 +14,12 @@ import hashlib
 import json
 import math
 import re
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
 import wandb
-
 from _common import (
     DATA_DIR,
     LONG_TO_SHORT,
@@ -241,7 +239,7 @@ def manifest_update(record: dict) -> None:
         data = json.loads(path.read_text())
     else:
         data = {"entries": []}
-    record["fetched_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    record["fetched_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     data["entries"].append(record)
     data["latest_fetched_at"] = record["fetched_at"]
     path.write_text(json.dumps(data, indent=2))

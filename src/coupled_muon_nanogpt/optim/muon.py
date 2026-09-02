@@ -59,7 +59,7 @@ class Muon(torch.optim.Optimizer):
         for p in adamw_params:
             self.state[p]["use_muon"] = False
 
-        from .ns_coefficients import get_coefficients, coefficients_to_tensor
+        from .ns_coefficients import coefficients_to_tensor, get_coefficients
 
         self.ns_coefficients_policy = str(ns_coefficients).lower()
         self.ns_gram_form = bool(ns_gram_form)

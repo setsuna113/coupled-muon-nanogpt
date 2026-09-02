@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import REPO_ROOT, RUNG_ORDER, write_table
+from _common import write_table
 
 # Hand-curated knob table per `configs/ladder/*.yaml` and experiment.md §d.2.
 # Sourced once at write-time; not re-derived from YAML to avoid coupling the

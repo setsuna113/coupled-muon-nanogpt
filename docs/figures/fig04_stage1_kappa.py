@@ -10,7 +10,6 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import DATA_DIR, OPT_COLOR, OPT_LABEL, OPTIMIZERS, save_fig, setup_mpl
 
-
 PAIRS = [("qk.0", "Q–K (layer 0)"), ("vo.0", "V–O (layer 0)"), ("updown.0", "up–down (layer 0)")]
 
 
