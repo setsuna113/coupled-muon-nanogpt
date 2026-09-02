@@ -1,5 +1,13 @@
 # Results index: where they live, how to query, what maps to which plan step
 
+> **Superseded (2026-09-02).** The project is closed. The per-plan-step
+> readout with numbers now lives in [`FINAL_STATUS.md`](FINAL_STATUS.md),
+> regenerated from the committed snapshot `data/wandb_all_runs_2026-09-02.parquet`
+> by `scripts/wandb_status_snapshot.py`. Section 4's "should exist but NOT yet
+> on wandb" list is stale: C1 pair-policy synced 6 of 45 cells; D3/D4/E1 were
+> never launched (D-gate negative). Sections 1–3 and 5 remain accurate as a
+> description of where raw results live on the cluster and how to query W&B.
+
 Snapshot: **2026-07-16**. Companion docs: `experiment.md` (the plan), `DISPATCH.md`
 (live dispatch state), `docs/README.md` (report build).
 

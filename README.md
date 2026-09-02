@@ -5,6 +5,46 @@ Research scaffold for the **Coupled Muon v2** bridging-experiment ladder defined
 LLaMA-60M baseline onto a toggleable, NanoGPT-style harness so the source of its gain
 can be localized via architectural ablations.
 
+## Status: closed (2026-09-02)
+
+The study ran 960 W&B runs (≈3.4k GPU-hours, ≈2.75T tokens) between May and July
+2026 and closed when cluster access ended. **Read `docs/FINAL_STATUS.md` first** —
+it is the single up-to-date readout, regenerated from a committed W&B snapshot.
+
+Headline results (final val loss, own-best LR per optimizer, paired seeds, 95% CI):
+
+| Setting | Coupled − Muon | Coupled − AdamW |
+|---|---|---|
+| Dense, full RoPE (A0 LLaMA-60M, B, G, H) | −0.008 … −0.024 nats, all CIs exclude 0 | −0.12 … −0.29 |
+| Dense, learned position (C, D) | +0.055 / +0.066 with the legacy flat-2D Q–K path; repaired to −0.02 … −0.04 by per-head Q–K coupling on probe-flagged runs (FINAL_STATUS §4.5) | −0.12 |
+| Sparse MoE (I, I′, J, K, L, M; 5B tokens) | −0.007 … −0.016, no cell diverged | −0.09 … −0.10 |
+| MLA rung O (natively factored KV) | **+0.003 [+0.003, +0.005]** — D-gate negative; factored-KV hypothesis falsified | −0.10 |
+
+Coupled costs 1.04–1.12× Muon's wall-clock per cell; one coupled inner step (K=1)
+already recovers ~75% of the gain. Where to look:
+
+| Question | Read |
+|---|---|
+| What is the algorithm, why might it work, what would falsify it | `experiment.md` (§a, Appendix X, §d.7) |
+| What ran, what it found, what is left | `docs/FINAL_STATUS.md` |
+| Project summary / contributions | `docs/PROJECT_SUMMARY.md` |
+| Could this still become a paper | `docs/PAPER_FEASIBILITY.md` |
+| Formal write-ups (LaTeX) of Stage 1–2 and Stage 3 at the 2026-05-19 snapshot | `docs/report.tex`, `docs/report_part2.tex` (build: `docs/README.md`) |
+| Historical dispatch state | `DISPATCH.md`, `docs/RESULTS.md` (frozen) |
+
+### The update rule in one paragraph
+
+Muon replaces a matrix gradient `G` by its polar factor `NS(G) ≈ UVᵀ` (Newton–Schulz
+quintic). Coupled Muon v2 treats weights that only ever appear as a *product* in the
+forward pass — `W_Q W_Kᵀ` per head (in RoPE's 2-D rotation blocks), `W_V W_O` per
+head, `W_up W_down` — as pairs `(A, B)` and computes a two-stage update
+`U_A = NS( C_A(G_A; B) )`, where stage 1 runs the same quintic on the iterate `X B`
+so that `X B → polar(G_A B)` (the *product* moves in its polar direction, using the
+partner's current value), and stage 2 re-orthogonalises `X` so the usual
+`lr·0.2·√max(rows, cols)` scaling applies. `coupled_steps=0` recovers plain Muon
+bitwise. Implementation: `src/coupled_muon_nanogpt/optim/coupled_muon.py`; pair
+classification: `optim/factory.py`.
+
 ## Quickstart
 
 ```bash

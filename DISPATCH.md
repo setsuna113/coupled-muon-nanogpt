@@ -1,5 +1,12 @@
 # Coupled-Muon Stage 3 Dispatch Manifest
 
+> **Historical (frozen 2026-07-16).** This file records the *live* dispatch
+> state while the cluster was available. The project closed on 2026-09-02
+> when GPU access ended; every "running / not launched / gated" entry below
+> is stale. For what actually ran and what it found, read
+> [`docs/FINAL_STATUS.md`](docs/FINAL_STATUS.md). Phase-2.1 D3/D4/E1 were
+> never launched because the D-gate came out negative (FINAL_STATUS §4.6).
+
 Operational record of which experiment runs on which rig and where the outputs
 land. See `experiment.md` for the design rationale; this file is the lookup
 table for "where do I find result X?".
