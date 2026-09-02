@@ -3,9 +3,15 @@
 Hand-built scientific report covering the Coupled Muon v2 dense-architecture
 ladder results. Audience: pre-training specialists; no Muon recap.
 
+**Project closed 2026-09-02.** `FINAL_STATUS.md` is the up-to-date readout of
+every plan step, including the Phase-2.1 projects (K-curve, NS policy,
+qk-policy repair, pair-policy, MLA) that these LaTeX reports never absorbed;
+`PROJECT_SUMMARY.md` is the narrative / CV material; `PAPER_FEASIBILITY.md`
+assesses a restart. The two reports below are frozen at the 2026-05-19 W&B
+snapshot and are still buildable as described here.
+
 See `RESULTS.md` for where results live on disk, how to query wandb, and which
-wandb project maps to which plan step (including Phase 2.1 work not yet in any
-report).
+wandb project maps to which plan step (historical; superseded by `FINAL_STATUS.md`).
 
 ## Three-command rebuild
 
