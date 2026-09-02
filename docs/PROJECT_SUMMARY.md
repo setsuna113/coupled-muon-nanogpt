@@ -122,12 +122,14 @@ sign-stable bootstrap CI) to commission the factored-architecture follow-ups.
    the legacy flat-2D Q–K path is 0.01–0.06 nats, and flat-2D coupling is
    worse than not coupling Q–K at all (D at lr 1e-2: 3.435 vs 3.408). Coupling
    per head, without the RoPE pair split, flips all three learned-position
-   rungs to the largest Coupled-over-Muon margins in the study (−0.02 to
-   −0.04 nats at matched LR) — *provided* probe-flagged runs are admitted;
-   n=3 and no QK-Norm, so this is the top open lead, not a claim. On the
-   partial-RoPE rung H′ (no flagged runs), splitting RoPE'd from non-RoPE
-   channels is the right policy but the margin is at the edge of resolution
-   (−0.003, CI [−0.004, +0.001], n=5).
+   rungs to a Coupled-over-Muon win of the same order as the full-RoPE rungs
+   (own-best-LR paired medians −0.011 to −0.024 nats) — *provided*
+   probe-flagged runs are admitted; n=3 and no QK-Norm, so this is the top
+   open lead, not a claim. The upshot is that Part I's "the gain needs RoPE"
+   reading was wrong: the gain needs the per-head geometry, and the legacy
+   code lost it without RoPE. On the partial-RoPE rung H′ (no flagged runs),
+   splitting RoPE'd from non-RoPE channels is the right policy but the margin
+   is at the edge of resolution (−0.003, CI [−0.004, +0.001], n=5).
 4. **The factored-KV hypothesis was falsified.** On the MLA rung — the one
    architecture whose weights are *natively* factored and the motivation for
    the whole Phase-2 tree — Coupled is slightly *worse* than Muon (+0.0034
@@ -141,12 +143,20 @@ sign-stable bootstrap CI) to commission the factored-architecture follow-ups.
    harmful. The (unpaired) kv-rank sweep is monotone in rank (3.359 → 3.222
    from rank 16 to 256), which says MLA at 60M wants more KV rank and says
    nothing about coupling.
-5. **Calibration.** Coupled beats a tuned AdamW by 0.09–0.29 nats on every
-   rung with an AdamW arm (Muon by 0.08–0.25), i.e. the usual 1.3–1.5×
-   token-efficiency reference for the Muon family. The Coupled-over-Muon
-   increment is ≈1.02–1.04× tokens and costs 1.04–1.12× wall-clock, so it is
-   a fixed-token improvement, not a wall-clock win, and nothing here was
-   validated above 60M.
+5. **Calibration, and what the mechanism probably is.** Coupled beats a
+   tuned AdamW by 0.09–0.29 nats on every rung with an AdamW arm (Muon by
+   0.08–0.25), i.e. the usual 1.3–1.5× token-efficiency reference for the
+   Muon family. The Coupled-over-Muon increment converts to 1.03–1.08× tokens
+   and costs 1.04–1.12× wall-clock — a fixed cost, not proportional to the
+   inner step count — so netted out it is 0.94–1.02× on every rung: a
+   mechanism-level fixed-token result, not a speedup, and nothing was
+   validated above 60M. The probes say what the mechanism likely is: at A0
+   Coupled's maximum attention logit runs 12–24% below Muon's (and below
+   AdamW's) all through training, which with the K=1 saturation, the
+   NS-policy invariance and the flat-2D harm points at Q–K coupling acting as
+   an implicit attention-logit stabiliser — the same instability MuonClip
+   fixes post hoc. The decisive control (Muon + QK-Clip vs Coupled) was never
+   run.
 
 ## 5. What the author learned (for the SOP / interviews)
 
@@ -242,21 +252,28 @@ CV blocks so they survive application portals.
   "better NS coefficients"; the MoE pair-policy sweep reproduces the dense
   factorial ordering.
 * *The most interesting number.* Flat-2D Q–K coupling is worse than no Q–K
-  coupling; per-head coupling beats Muon by 0.02–0.04 nats on the
-  learned-position rungs. Geometry is the whole story — and I have not
-  claimed it, because those runs sit above the attention-logit threshold and
-  need a QK-Norm or QK-Clip control (≈200 GPU-hours).
+  coupling; per-head coupling beats Muon by 0.01–0.02 nats at own-best LR on
+  the learned-position rungs, which undoes Part I's "needs RoPE" story.
+  Geometry is the whole story — and I have not claimed it, because those runs
+  sit above the attention-logit threshold and need a QK-Norm or QK-Clip
+  control (≈120–160 GPU-hours at 3 seeds).
+* *The cheapest decisive experiment.* Muon + QK-Clip vs Coupled at A0, ≈40
+  GPU-hours: if they match, coupling is an implicit MuonClip and the paper
+  says so; if Coupled still wins, the geometric claim survives its hardest
+  control. Worth running whichever way it comes out.
 * *The negative result and why I trust it.* MLA D-gate, pre-registered rule,
   four paired seeds at 5B tokens, and a mechanistic reason it failed: the
   coupled MLA pair is a low-rank factorisation, not a forward-pass bilinear
   form, and it went through the flat-2D path. The hypothesis was falsifiable,
   and it got falsified.
 * *Cost, stated against my own interest.* 1.04–1.12× Muon's wall-clock for a
-  ≈1.02–1.04× token-budget gain; if one coupled step recovers 75–80% of the
-  gain and K ≥ 3 is flat, the expensive default was never the point.
+  1.03–1.08× token-budget gain, i.e. wall-clock neutral; the overhead is a
+  fixed cost, so the K=1 result simplifies the algorithm but does not make it
+  cheaper.
 * *Scale.* Everything is 60M. The literature says matrix-optimiser speedups
-  shrink with scale; one 350M rung (≈220 GPU-hours) is the first thing a
-  reviewer would ask for and the second thing I would run.
+  shrink with scale; one 350M rung at 7B tokens (≈430 GPU-hours, no AdamW
+  anchor) is the first thing a reviewer would ask for, and I would run it
+  only after the mechanism control.
 * *What I got wrong.* I let a probe-based divergence flag act as an
   exclusion rule across an LR grid, which manufactured most of a 0.06-nat
   regression; and I coupled MLA through the one code path my own later

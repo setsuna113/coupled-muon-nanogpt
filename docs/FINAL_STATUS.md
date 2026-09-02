@@ -35,12 +35,21 @@ excluded from the protocol readout (see §6 for what that flag actually is).
   factored MLA rung (O_mla), Coupled Muon is *not* better than Muon
   (+0.0034 nats, CI [+0.0028, +0.0047], n=4). D3/D4/E1 were therefore never
   commissioned, correctly per the pre-registered decision rule.
-* **The most interesting unpublished lead** is the qk-policy repair: a
-  per-head Q–K coupling (`headwise_no_rope`) turns the Part-I regression on
-  learned-position rungs into the largest Coupled-over-Muon margins in the
-  study (−0.02 to −0.04 nats at matched LR), but only when probe-flagged
-  runs are admitted (§4.5, §6). It needs a QK-Norm or QK-Clip control before
-  it can be claimed.
+* **The Part-I "RoPE-dependence" story does not survive Phase 2.1.** The C/D
+  regression was mostly an LR-window artefact of the divergence-flag
+  exclusion rule plus a genuinely harmful flat-2D Q–K geometry; a per-head
+  Q–K coupling (`headwise_no_rope`) removes it and gives the usual small win
+  on the learned-position rungs too (own-best-LR paired medians −0.011 to
+  −0.024 nats, n=3, probe-flagged runs admitted; §4.5, §6). It needs a
+  QK-Norm or QK-Clip control before it can be claimed.
+* **It is not a wall-clock win.** Converting each rung's loss gain into the
+  extra tokens Muon would need, and netting against Coupled's measured
+  runtime tax, gives 0.94–1.02× on every rung (§4.7). The overhead is a fixed
+  cost of forming the products and the second NS pass, not proportional to K.
+* **The mechanism evidence points at attention-logit control.** At A0's best
+  LR Coupled's global max pre-softmax logit runs 12–24% below Muon's (and
+  below AdamW's) throughout training (§4.8), consistent with the K=1 result,
+  the NS-policy invariance and the flag rates on C/D/E.
 
 ## 2. Evidence inventory (W&B, entity `liuyc1025-university-of-cambridge`)
 
@@ -122,7 +131,10 @@ A0, lr 3e-3, vs plain Muon (n=5 reference seeds at 3.432):
 
 I (MoE), lr 1e-2, vs Muon 3.0680: K=1 −0.0086, K=2 −0.0097, K=4 −0.0107.
 **One coupled inner step recovers ~75–80% of the gain; the curve is flat for
-K ≥ 3.** The default K=4 is not special.
+K ≥ 3.** The default K=4 is not special. Runtime does *not* follow K: at A0
+Muon takes 1586 s per cell, Coupled with K=0 1592 s, K=1 1642–1656 s (+4%),
+K=4 1665–1673 s, K=12 1717 s (+8%). The overhead is a fixed cost (forming
+the products, the stage-2 NS pass), so K=1 does not buy the runtime back.
 
 ### 4.3 A2 — Newton–Schulz coefficient policy (`coupled-muon-ns-policy`, A0, lr 3e-3, 2 seeds)
 
@@ -181,16 +193,34 @@ C 3.353 (n=1), D 3.356 (n=1), E 3.354 (n=2), i.e. **below the ladder Muon best
 | E | 3e-3 | 3.400 | 3.408 | 3.417 | **3.366** |
 | E | 1e-2 | 3.393 | 3.407 | 3.406 | **3.355** |
 
-Three things follow. (i) The Part-I "+0.06 regression" is mostly an
-LR-window/flagging artefact: at matched LR the legacy flat-2D path trails
-Muon by only 0.01–0.06 and `qk_off` by 0.00–0.03. (ii) Flat-2D Q–K coupling
-is *actively harmful* relative to not coupling Q–K at all (D @1e-2: 3.435 vs
-3.408) — the coupling must respect the per-head bilinear structure.
-(iii) Per-head coupling without the RoPE pair-split beats Muon by
-0.02–0.04 nats on all three learned-position rungs, the largest Coupled
-margins anywhere in the study. Caveat: these are 60M runs without QK-Norm
-whose max attention logit exceeded 1000 (§6); n=3; and the effect on the
-flag rate (1–2/3 vs 3/3) is suggestive, not established.
+Reading the same rows at each arm's **own best LR** (flag ignored, finite
+loss only, paired by seed, n=3):
+
+| Rung | Muon best | legacy flat-2D | `qk_off` | `headwise_no_rope` | B2 5-seed headwise |
+|---|---|---|---|---|---|
+| C | 3.3713 @1e-2 | +0.012 (3.3945) | +0.021 (3.3909) | **−0.011** (3.3579 @3e-3) | −0.012 (3.3553) |
+| D | 3.3762 @1e-2 | +0.032 (3.4019) | +0.032 (3.4060) | **−0.013** (3.3565 @1e-2) | −0.015 (3.3561) |
+| E | 3.3926 @1e-2 | +0.014 (3.4049) | −0.001 (3.4060) | **−0.024** (3.3546 @1e-2) | — |
+
+(paired median differences; medians in parentheses). Under the protocol
+readout, unflagged rows only, B2 gives C −0.006 (n=2 vs 2) and D −0.018
+(n=3 vs 2).
+
+Three things follow. (i) The Part-I "+0.055/+0.066 regression" is mostly an
+LR-window artefact of the flag-exclusion rule: at own-best LR with the flag
+ignored, the legacy flat-2D path trails Muon by 0.012–0.032 and `qk_off` by
+0.00–0.03. (ii) Flat-2D Q–K coupling is harmful relative to not coupling Q–K
+at all on D (3.435 vs 3.408 @1e-2) and no better on C/E — the coupling must
+respect the per-head bilinear structure. (iii) Per-head coupling without the
+RoPE pair-split beats Muon by 0.011–0.024 nats (paired medians) on all three
+learned-position rungs, the same order as the full-RoPE rungs; the −0.03 to
+−0.04 numbers in the matched-LR table above compare against Muon at a
+non-best LR and overstate it. So the correct statement is not "the gain is
+RoPE-dependent" but "the gain is per-head-geometry-dependent, and the
+legacy code got the geometry wrong without RoPE". Caveats: 60M, no QK-Norm,
+max attention logit above 1000 on most of these runs (§6), n=3; on D the
+flagged seeds are worse than the unflagged ones (3.372 vs 3.355), so the
+unflagged readout there is partly selection on outcome.
 
 **H′ (H with 50% RoPE, modded-nanogpt-faithful).** No cell flagged. Muon
 best 3.2519 @1e-2 (n=5). Coupled policies @1e-2: flat-2D 3.2542, `qk_off`
@@ -229,6 +259,58 @@ step, and the `use_multi_head=false` flat-2D path is exactly the geometry
 §4.5 shows to be harmful. The "natural optimizer for factored KV" framing
 was falsified at this scale; the experiment did its job.
 
+### 4.7 Wall-clock accounting
+
+Fixed-token loss deltas are not speedups. For each rung, fit the Muon
+best-LR validation curve's tail slope `dL/d ln(tokens)` (last 40% of tokens,
+median over seeds, from `docs/data/*_history_bestlr_curves.parquet`),
+convert the Coupled − Muon delta into the token multiple Muon would need to
+reach Coupled's loss, and net it against the measured runtime ratio at each
+arm's best LR (`scripts/wallclock_accounting.py`):
+
+| Rung | Coupled − Muon | Muon tail slope | Muon tokens to match | runtime tax | **net wall-clock** |
+|---|---|---|---|---|---|
+| A0 | −0.024 | −0.32 | 1.078× | 1.057× | **1.02×** |
+| B | −0.008 | −0.26 | 1.029× | 1.058× | 0.97× |
+| C (legacy) | +0.064 | −0.26 | 0.781× | 1.036× | 0.75× |
+| D (legacy) | +0.053 | −0.22 | 0.789× | 1.045× | 0.76× |
+| E | −0.002 | −0.27 | 1.008× | 1.045× | 0.96× |
+| G | −0.011 | −0.24 | 1.044× | 1.043× | 1.00× |
+| H | −0.015 | −0.25 | 1.064× | 1.067× | 1.00× |
+| I | −0.012 | −0.28 | 1.042× | 1.044× | 1.00× |
+| I′ | −0.015 | −0.28 | 1.056× | 1.118× | 0.94× |
+
+Cosine decay steepens the tail slope, so the token multiples are
+conservative (an upper bound on Coupled's token advantage is roughly 2× these
+excess fractions, which would still leave every rung except A0 within ±6%).
+**At its own operating point Coupled Muon is wall-clock neutral against
+Muon.** The honest framing of the result is therefore a fixed-token,
+mechanism-level finding, not an efficiency claim.
+
+### 4.8 Attention-logit evidence for the mechanism
+
+The probe `probe/attn_logit/global_max` (max pre-softmax logit over all
+layers/heads) at A0's best LR, median over seeds
+(`docs/data/coupled_muon_A0_repro_history_bestlr_probes.parquet`):
+
+| tokens | AdamW @3e-3 | Muon @1e-2 | Coupled @1e-2 |
+|---|---|---|---|
+| 0.23B | 362 | 370 | 210 |
+| 0.45B | 372 | 366 | 296 |
+| 0.66B | 276 | 336 | 290 |
+| 0.88B | 244 | 288 | 229 |
+| 1.10B | 220 | 248 | 202 |
+
+Coupled's maximum attention logit sits 12–24% below Muon's for the whole run
+and below AdamW's for most of it — the direction MuonClip enforces by
+post-hoc rescaling. On the QK-Norm MoE rungs (I, I′) the max logit is 14–24
+for every optimizer, i.e. the instability is already removed there. Taken
+with the K=1 result (§4.2), the NS-policy invariance (§4.3), the harm of
+flat-2D Q–K geometry (§4.5) and the flag rates on C/D/E (§6), the
+most economical explanation is that Q–K coupling acts as an implicit
+attention-logit stabiliser. The decisive control — Muon + QK-Clip vs
+Coupled at A0 — was never run (§7).
+
 ## 5. Timeline
 
 | Window | Work |
@@ -255,15 +337,20 @@ to do if the project restarts.
 
 ## 7. Open leads, ranked by value per GPU-hour
 
-1. **Per-head Q–K coupling on non-RoPE / partial-RoPE attention** (§4.5).
-   Clean it up: C/D/E × {Muon, `headwise_no_rope`, `qk_off`} × 3 LRs × 5 seeds
-   with QK-Norm on, plus attention-logit traces. ~135 cells × 0.75 h ≈ 100
-   2-GPU-hours. If the −0.02…−0.04 margin survives, it is the headline.
-2. **Why coupling helps: stability vs geometry.** The K=1 result (§4.2), the
-   flat-2D harm (§4.5) and the flag rates all point at Q–K logit control.
-   A MuonClip/QK-Clip-vs-Coupled comparison at A0 would settle it cheaply.
-3. **Scale.** Everything is 60M-CS. One 350M dense rung (A0 shape scaled,
-   Muon vs Coupled, 3 seeds × 2 LRs) ≈ 12 cells × 9 h.
+1. **Why coupling helps: stability vs geometry** (§4.8). A0 × {Muon,
+   Muon + QK-Clip(τ≈50–1000), Coupled, Coupled + QK-Clip} × 2–3 LRs × 5 seeds
+   with logit traces: ~40 cells × 0.46 h × 2 GPUs ≈ 40 GPU-hours. QK-Clip is
+   not implemented (only the probe threshold exists) — ~50 lines. If
+   Coupled ≈ Muon + QK-Clip, the mechanism is settled; if Coupled still wins,
+   the geometric claim survives its hardest control. Publishable either way.
+2. **Per-head Q–K coupling on non-RoPE attention** (§4.5). C/D/E × {Muon,
+   `headwise_no_rope`, `qk_off`} × 3 LRs with QK-Norm on: 81 cells at 3 seeds
+   ≈ 120–160 GPU-hours, 135 cells at 5 seeds ≈ 200–270. Pre-register the
+   readout as "all finite-loss runs, flag rate reported separately".
+3. **Scale.** Everything is 60M-CS. One 350M dense rung at 7B tokens
+   (`Z_350m_dense.yaml`, ~9 h/cell on 4×H200 ⇒ ~36 GPU-h/cell): Muon vs
+   Coupled × 2 LRs × 3 seeds ≈ 430 GPU-hours, with no AdamW anchor. The
+   literature prior is that the gap shrinks; a null there ends the paper.
 4. **MLA done right**: 3-way (UK, UV, DKV) coupling or `headwise` coupling
    of the per-head up-projections — an algorithmic change, not a rerun.
 5. Sync the 39 on-disk C1 cells; run the N rung (4 experts).

@@ -16,12 +16,14 @@ Headline results (final val loss, own-best LR per optimizer, paired seeds, 95% C
 | Setting | Coupled − Muon | Coupled − AdamW |
 |---|---|---|
 | Dense, full RoPE (A0 LLaMA-60M, B, G, H) | −0.008 … −0.024 nats, all CIs exclude 0 | −0.12 … −0.29 |
-| Dense, learned position (C, D) | +0.055 / +0.066 with the legacy flat-2D Q–K path; repaired to −0.02 … −0.04 by per-head Q–K coupling on probe-flagged runs (FINAL_STATUS §4.5) | −0.12 |
+| Dense, learned position (C, D, E) | +0.055 / +0.066 / tie with the legacy flat-2D Q–K path (mostly an LR-window artefact of the divergence-flag rule); −0.011 … −0.024 at own-best LR with per-head Q–K coupling, probe-flagged runs admitted, n=3 (FINAL_STATUS §4.5) | −0.12 |
 | Sparse MoE (I, I′, J, K, L, M; 5B tokens) | −0.007 … −0.016, no cell diverged | −0.09 … −0.10 |
 | MLA rung O (natively factored KV) | **+0.003 [+0.003, +0.005]** — D-gate negative; factored-KV hypothesis falsified | −0.10 |
 
-Coupled costs 1.04–1.12× Muon's wall-clock per cell; one coupled inner step (K=1)
-already recovers ~75% of the gain. Where to look:
+Coupled costs 1.04–1.12× Muon's wall-clock per cell (a fixed cost, not
+proportional to the inner step count), which nets the fixed-token gain out to
+0.94–1.02× on every rung: it is a mechanism-level result, not a speedup
+(FINAL_STATUS §4.7). Where to look:
 
 | Question | Read |
 |---|---|
