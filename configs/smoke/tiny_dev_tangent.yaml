@@ -1,0 +1,41 @@
+# TangentMuon pipeline sanity: tiny_dev with optimizer.type=tangent_muon.
+# ~10M params, all probes off. Uses the same pre-tokenised synthetic shards as
+# tiny_dev (data/synthetic_smoke/). Not a result — a smoke test that the
+# tangent_muon path runs end to end through train.py.
+name: tiny_dev_tangent
+
+data:
+  shard_dir: data/synthetic_smoke
+
+model:
+  hidden: 256
+  n_layers: 4
+  attn:
+    n_heads: 4
+  mlp:
+    type: swiglu
+
+optimizer:
+  type: tangent_muon
+  lr: 3.0e-3
+  tangent_variant: v3
+  damping: 0.1
+  use_multi_head: true
+
+train:
+  total_tokens: 5_000_000
+  seq_len: 1024
+  local_batch_size: 8
+  grad_accum_steps: 1
+  warmup_steps: 50
+  log_every_steps: 5
+  eval_every_steps: 100
+  val_tokens: 200_000
+  probes:
+    svd_interval_tokens: 0
+    coupled_pair_interval_tokens: 0
+    attn_logit_interval_tokens: 0
+    pair_factor_ratio_interval_tokens: 0
+
+run:
+  wandb: false

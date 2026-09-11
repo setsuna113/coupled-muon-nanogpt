@@ -19,6 +19,7 @@ import torch.nn as nn
 
 from .coupled_muon import CoupledMuon_v2
 from .muon import Muon
+from .tangent_muon import TangentMuon
 
 
 def _resolve_ns_dtype(name: str) -> torch.dtype:
@@ -256,6 +257,93 @@ def classify_parameters(
     return groups
 
 
+def _collect_coupled_pairs(model: nn.Module, opt: Any, n_heads: int, n_kv_heads: int):
+    """Resolve the pair_policy enum / couple_* booleans, classify the model's
+    parameters and emit the ``(A, B, n_heads_for_pair, is_qk)`` tuples in the
+    order vo, updown, qk, mla_kv, mla_q, factff. Shared by the
+    ``coupled_muon_v2`` and ``tangent_muon`` builders; the code is the
+    former inline block of the coupled_muon_v2 branch, unchanged.
+    """
+    # Phase-2.1: resolve pair_policy enum (Phase C support). When set,
+    # it overrides the couple_qk/vo/updown booleans. Conflict raises
+    # unless `allow_pair_policy_override` is true (review v3 §pair_policy).
+    pair_policy = opt.get("pair_policy", None)
+    pair_policy_str = str(pair_policy).lower() if pair_policy is not None else None
+    if pair_policy_str in ("", "null", "none"):
+        pair_policy_str = None
+    allow_override = bool(opt.get("allow_pair_policy_override", False))
+    if pair_policy_str is not None:
+        _enum_map = {
+            "all":            (True,  True,  True),
+            "attention_only": (True,  True,  False),
+            "ffn_only":       (False, False, True),
+        }
+        if pair_policy_str not in _enum_map:
+            raise ValueError(
+                f"Unknown optimizer.pair_policy={pair_policy_str!r}. "
+                f"Expected one of: all | attention_only | ffn_only | null."
+            )
+        cqk_eff, cvo_eff, cud_eff = _enum_map[pair_policy_str]
+        # Detect conflicts with explicit couple_* booleans. opt.couple_*
+        # comes from base.yaml defaults (True/True/True); flag a mismatch
+        # only when the YAML's explicit value disagrees with the enum.
+        for k, want, got in (
+            ("couple_qk",     cqk_eff, bool(opt.couple_qk)),
+            ("couple_vo",     cvo_eff, bool(opt.couple_vo)),
+            ("couple_updown", cud_eff, bool(opt.couple_updown)),
+        ):
+            if want != got:
+                msg = (
+                    f"optimizer.pair_policy={pair_policy_str!r} implies {k}={want}, "
+                    f"but optimizer.{k}={got} was explicitly set."
+                )
+                if allow_override:
+                    warnings.warn(
+                        msg + " Honoring pair_policy (allow_pair_policy_override=true).",
+                        stacklevel=2,
+                    )
+                else:
+                    raise ValueError(
+                        msg + " Set optimizer.allow_pair_policy_override=true to "
+                        "demote this to a warning."
+                    )
+    else:
+        cqk_eff = bool(opt.couple_qk)
+        cvo_eff = bool(opt.couple_vo)
+        cud_eff = bool(opt.couple_updown)
+
+    groups = classify_parameters(
+        model,
+        couple_qk=cqk_eff,
+        couple_vo=cvo_eff,
+        couple_updown=cud_eff,
+        couple_mla=bool(opt.get("couple_mla", True)),
+        couple_factff=bool(opt.get("couple_factff", True)),
+        n_heads=n_heads,
+        n_kv_heads=n_kv_heads,
+        couple_router_to_muon=bool(opt.get("couple_router_to_muon", True)),
+    )
+    # Build the list of (A, B, n_heads_for_pair, is_qk) tuples.
+    coupled_pairs: list[tuple[nn.Parameter, nn.Parameter, int, bool]] = []
+    for a, b, h in groups.coupled_vo:
+        coupled_pairs.append((a, b, h, False))
+    for a, b, h in groups.coupled_updown:
+        coupled_pairs.append((a, b, h, False))
+    for a, b, h in groups.coupled_qk:
+        coupled_pairs.append((a, b, h, True))
+    # Phase-2 factored-architecture pairs. MLA pairs use is_qk=False
+    # (the multi-head Q-K reshape path requires the 2-D RoPE rotation
+    # block structure, which MLA's split nope/rope head layout doesn't
+    # match; flat-2D coupling is the correct path). factff also flat-2D.
+    for a, b, h in groups.coupled_mla_kv:
+        coupled_pairs.append((a, b, h, False))
+    for a, b, h in groups.coupled_mla_q:
+        coupled_pairs.append((a, b, h, False))
+    for a, b, h in groups.coupled_factff:
+        coupled_pairs.append((a, b, h, False))
+    return groups, coupled_pairs
+
+
 def build_optimizer(
     model: nn.Module,
     cfg: Any,
@@ -323,83 +411,7 @@ def build_optimizer(
         )
 
     if opt.type == "coupled_muon_v2":
-        # Phase-2.1: resolve pair_policy enum (Phase C support). When set,
-        # it overrides the couple_qk/vo/updown booleans. Conflict raises
-        # unless `allow_pair_policy_override` is true (review v3 §pair_policy).
-        pair_policy = opt.get("pair_policy", None)
-        pair_policy_str = str(pair_policy).lower() if pair_policy is not None else None
-        if pair_policy_str in ("", "null", "none"):
-            pair_policy_str = None
-        allow_override = bool(opt.get("allow_pair_policy_override", False))
-        if pair_policy_str is not None:
-            _enum_map = {
-                "all":            (True,  True,  True),
-                "attention_only": (True,  True,  False),
-                "ffn_only":       (False, False, True),
-            }
-            if pair_policy_str not in _enum_map:
-                raise ValueError(
-                    f"Unknown optimizer.pair_policy={pair_policy_str!r}. "
-                    f"Expected one of: all | attention_only | ffn_only | null."
-                )
-            cqk_eff, cvo_eff, cud_eff = _enum_map[pair_policy_str]
-            # Detect conflicts with explicit couple_* booleans. opt.couple_*
-            # comes from base.yaml defaults (True/True/True); flag a mismatch
-            # only when the YAML's explicit value disagrees with the enum.
-            for k, want, got in (
-                ("couple_qk",     cqk_eff, bool(opt.couple_qk)),
-                ("couple_vo",     cvo_eff, bool(opt.couple_vo)),
-                ("couple_updown", cud_eff, bool(opt.couple_updown)),
-            ):
-                if want != got:
-                    msg = (
-                        f"optimizer.pair_policy={pair_policy_str!r} implies {k}={want}, "
-                        f"but optimizer.{k}={got} was explicitly set."
-                    )
-                    if allow_override:
-                        warnings.warn(
-                            msg + " Honoring pair_policy (allow_pair_policy_override=true).",
-                            stacklevel=2,
-                        )
-                    else:
-                        raise ValueError(
-                            msg + " Set optimizer.allow_pair_policy_override=true to "
-                            "demote this to a warning."
-                        )
-        else:
-            cqk_eff = bool(opt.couple_qk)
-            cvo_eff = bool(opt.couple_vo)
-            cud_eff = bool(opt.couple_updown)
-
-        groups = classify_parameters(
-            model,
-            couple_qk=cqk_eff,
-            couple_vo=cvo_eff,
-            couple_updown=cud_eff,
-            couple_mla=bool(opt.get("couple_mla", True)),
-            couple_factff=bool(opt.get("couple_factff", True)),
-            n_heads=n_heads,
-            n_kv_heads=n_kv_heads,
-            couple_router_to_muon=bool(opt.get("couple_router_to_muon", True)),
-        )
-        # Build the list of (A, B, n_heads_for_pair, is_qk) tuples.
-        coupled_pairs: list[tuple[nn.Parameter, nn.Parameter, int, bool]] = []
-        for a, b, h in groups.coupled_vo:
-            coupled_pairs.append((a, b, h, False))
-        for a, b, h in groups.coupled_updown:
-            coupled_pairs.append((a, b, h, False))
-        for a, b, h in groups.coupled_qk:
-            coupled_pairs.append((a, b, h, True))
-        # Phase-2 factored-architecture pairs. MLA pairs use is_qk=False
-        # (the multi-head Q-K reshape path requires the 2-D RoPE rotation
-        # block structure, which MLA's split nope/rope head layout doesn't
-        # match; flat-2D coupling is the correct path). factff also flat-2D.
-        for a, b, h in groups.coupled_mla_kv:
-            coupled_pairs.append((a, b, h, False))
-        for a, b, h in groups.coupled_mla_q:
-            coupled_pairs.append((a, b, h, False))
-        for a, b, h in groups.coupled_factff:
-            coupled_pairs.append((a, b, h, False))
+        groups, coupled_pairs = _collect_coupled_pairs(model, opt, n_heads, n_kv_heads)
 
         # Phase-2.1: compute rope_status and resolve qk_coupling policy.
         # The pre-refactor behavior ("disable use_multi_head; fall through to
@@ -475,6 +487,38 @@ def build_optimizer(
             qk_coupling_partial_rope_policy=qk_partial_rope,
             rope_status=rope_status,
             rotary_dim=rotary_dim,
+        )
+
+    if opt.type == "tangent_muon":
+        groups, coupled_pairs = _collect_coupled_pairs(model, opt, n_heads, n_kv_heads)
+        # Kinds aligned with the tuple order emitted above. Attention pairs get
+        # the per-head treatment; everything else is a flat (out,k)(k,in)
+        # product (up-down, MLA K-side / Q-side, FactFF).
+        pair_kinds = (
+            ["vo"] * len(groups.coupled_vo)
+            + ["flat"] * len(groups.coupled_updown)
+            + ["qk"] * len(groups.coupled_qk)
+            + ["flat"] * (len(groups.coupled_mla_kv) + len(groups.coupled_mla_q) + len(groups.coupled_factff))
+        )
+        return TangentMuon(
+            lr=float(opt.lr),
+            wd=wd,
+            coupled_pairs=coupled_pairs,
+            pair_kinds=pair_kinds,
+            muon_params=list(groups.muon_2d),
+            adamw_params=list(groups.adamw_other) + list(groups.router_params),
+            momentum=float(opt.momentum),
+            nesterov=bool(opt.get("nesterov", True)),
+            ns_steps=int(opt.ns_steps),
+            adamw_betas=tuple(opt.betas),
+            adamw_eps=float(opt.eps),
+            tangent_variant=str(opt.get("tangent_variant", "v3")),
+            damping=float(opt.get("damping", 0.1)),
+            use_multi_head=bool(opt.get("use_multi_head", True)),
+            n_heads=n_heads,
+            ns_dtype=_resolve_ns_dtype(opt.get("ns_dtype", "bf16")),
+            ns_coefficients=str(opt.get("ns_coefficients", "bernstein")),
+            lr_prefactor=str(opt.get("lr_prefactor", "moonlight")),
         )
 
     raise ValueError(f"Unknown optimizer.type={opt.type!r}")

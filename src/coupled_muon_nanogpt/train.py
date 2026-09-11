@@ -237,6 +237,8 @@ def main(argv: list[str] | None = None) -> None:
         for pg in optimizer.param_groups:
             pg["lr"] = lr_t
 
+        # Pair-coupling optimizers: coupled_muon_v2 and its tangent-space port.
+        pairs_active = cfg.optimizer.type in ("coupled_muon_v2", "tangent_muon")
         ctx_for_probes: dict[str, Any] = {
             "step": step,
             "n_heads": int(cfg.model.attn.n_heads),
@@ -246,11 +248,11 @@ def main(argv: list[str] | None = None) -> None:
             # actually couples, not pairs `classify_parameters` would
             # default-on. Plain-Muon and AdamW paths set the relevant flags
             # to False in their builders, so we mirror those here.
-            "couple_qk": bool(cfg.optimizer.get("couple_qk", True)) and cfg.optimizer.type == "coupled_muon_v2",
-            "couple_vo": bool(cfg.optimizer.get("couple_vo", True)) and cfg.optimizer.type == "coupled_muon_v2",
-            "couple_updown": bool(cfg.optimizer.get("couple_updown", True)) and cfg.optimizer.type == "coupled_muon_v2",
-            "couple_mla": bool(cfg.optimizer.get("couple_mla", True)) and cfg.optimizer.type == "coupled_muon_v2",
-            "couple_factff": bool(cfg.optimizer.get("couple_factff", True)) and cfg.optimizer.type == "coupled_muon_v2",
+            "couple_qk": bool(cfg.optimizer.get("couple_qk", True)) and pairs_active,
+            "couple_vo": bool(cfg.optimizer.get("couple_vo", True)) and pairs_active,
+            "couple_updown": bool(cfg.optimizer.get("couple_updown", True)) and pairs_active,
+            "couple_mla": bool(cfg.optimizer.get("couple_mla", True)) and pairs_active,
+            "couple_factff": bool(cfg.optimizer.get("couple_factff", True)) and pairs_active,
             "couple_router_to_muon": bool(cfg.optimizer.get("couple_router_to_muon", True)),
         }
 

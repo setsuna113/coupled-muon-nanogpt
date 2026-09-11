@@ -71,7 +71,7 @@ model:
                                 # size while keeping the dense MLP fixed.
 
 optimizer:
-  type: coupled_muon_v2         # adamw | muon | coupled_muon_v2
+  type: coupled_muon_v2         # adamw | muon | coupled_muon_v2 | tangent_muon
   lr: 3.0e-3                    # for muon-family; AdamW configs override
   wd: 0.1                       # base value; with `wd_per_width: true` it is
                                 # divided by hidden at apply time per d.3 +
@@ -106,6 +106,13 @@ optimizer:
   # ablation (experiment.md a.2 / d.4). Toggle to localize whether the trailing
   # NS pass is doing real work or is approximately a no-op.
   final_polish: true
+  # TangentMuon (optimizer.type=tangent_muon; optim/tangent_muon.py): the
+  # product-space momentum C = P·M_Q + M_P·Q is orthogonalized directly and
+  # split back to the two factors by a damped Sylvester solve. `damping`
+  # scales the Sylvester regulariser relative to the pair's Gram magnitude.
+  # Both keys are ignored by the other optimizer types.
+  tangent_variant: v3           # v3 (balanced Sylvester split) | v7 (msign in coefficient space)
+  damping: 0.1
   # Router optimizer: True (default, matches Moonlight 2502.16982 §3.4 and
   # Cerebras nanoMoE) routes MoE routers through Muon. False → AdamW (rung J
   # ablation, DeepSeek-V2/V3/OLMoE-style). See experiment.md c.3.

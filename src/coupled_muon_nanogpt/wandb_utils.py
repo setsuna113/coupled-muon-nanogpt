@@ -192,6 +192,10 @@ def _resolve_tags(cfg: Any, seed: int) -> list[str]:
             tags.append(f"balance:{balancing}")
         if bool(moe.get("shared_expert", False)):
             tags.append("shared_expert")
+    if str(cfg.optimizer.type) == "tangent_muon":
+        tags.append(f"tangent_{str(cfg.optimizer.get('tangent_variant', 'v3'))}")
+        if bool(cfg.optimizer.get("use_multi_head", True)):
+            tags.append("multi_head")
     if str(cfg.optimizer.type) == "coupled_muon_v2":
         tags.append(f"cs{int(cfg.optimizer.get('coupled_steps', 0))}")
         if bool(cfg.optimizer.get("couple_qk", False)):

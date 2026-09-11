@@ -51,7 +51,7 @@ Optimizer side:
 
 | Knob | Values | Notes |
 |---|---|---|
-| `optimizer.type` | `adamw`, `muon`, `coupled_muon_v2` | three optimizers compared |
+| `optimizer.type` | `adamw`, `muon`, `coupled_muon_v2`, `tangent_muon` | the three compared optimizers, plus the TangentMuon port (see below) |
 | `optimizer.coupled_steps` | int (0 = plain Muon) | d.4 ablation |
 | `optimizer.couple_qk` / `couple_vo` / `couple_updown` | bool | individual coupling toggles |
 | `optimizer.ns_dtype` | `bf16`, `fp32` | d.6.3 stability |
@@ -114,6 +114,24 @@ Sweep YAMLs that vary axes the fallback group formula doesn't capture (e.g.
 `pair_ablation` varies `couple_qk/vo/updown`) override `run.wandb_group` with
 OmegaConf interpolation; see `configs/sweeps/pair_ablation.yaml` for the
 pattern.
+
+## TangentMuon (`optimizer.type: tangent_muon`)
+
+`src/coupled_muon_nanogpt/optim/tangent_muon.py` ports TangentMuon from the
+LoRA benchmark (`setsuna113/Muon`, `muon_bench/tangent_muon.py`) to this
+harness's coupled pairs. Where Coupled Muon orthogonalizes one factor at a
+time given its partner, TangentMuon takes the matrix sign of the product's
+own first-order change `C = P·M_Q + M_P·Q` and splits it back to the two
+factors through a damped Sylvester equation; since `C` has rank at most `2k`,
+the update runs on a `2k × 2k` core whenever that is cheaper than the dense
+product (the two routes are tested to agree). Q-K and V-O are handled per
+attention head (under GQA the shared KV head's update is averaged over its
+query heads); up-down, MLA and FactFF pairs are flat products. Knobs:
+`optimizer.tangent_variant` (`v3` balanced split, `v7` sign in coefficient
+space), `optimizer.damping`, `optimizer.use_multi_head`, `optimizer.ns_steps`.
+Derivation: `docs/tangent_muon_derivation.pdf`. Tests:
+`tests/test_tangent_muon.py`. No training runs with this optimizer have been
+performed in this repo; the LoRA-scale comparison lives in the Muon repo.
 
 ## References
 
